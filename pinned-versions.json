@@ -10,6 +10,18 @@
     "present in the declared section."
   ],
   "pins": {
+    "katex": {
+      "section": "overrides",
+      "why": "Clears GHSA-238p-pmpm-9mq7, patched in 0.18.2. Current markdownlint uses micromark-extension-math 3.1.0, which requires KaTeX ^0.16.0; no parent upgrade reaches the patch. Its consumer uses renderToString. Verify inline and display math before lifting the override.",
+      "check": "node -p \"require('./node_modules/micromark-extension-math/package.json').dependencies.katex\"",
+      "expect": "^0.16.0"
+    },
+    "moment": {
+      "section": "overrides",
+      "why": "Clears GHSA-4p3w-j4w9-5jqw, patched in 2.31.0. Current eslint-plugin-obsidianmd pins obsidian 1.12.3, which pins Moment 2.29.4. Deduplicates onto the patched 2.x version already used by the direct Obsidian package. Remove when the plugin uses an Obsidian release with patched Moment.",
+      "check": "node -p \"require('./node_modules/eslint-plugin-obsidianmd/package.json').dependencies.obsidian\"",
+      "expect": "1.12.3"
+    },
     "typescript": {
       "check": "node -e \"process.stdout.write(require('typescript-eslint/package.json').peerDependencies.typescript)\"",
       "expect": ">=4.8.4 <6.1.0",
