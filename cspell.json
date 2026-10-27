@@ -41,10 +41,13 @@
     "markdownlint",
     "nvmrc",
     "obsidianmd",
+    "omnisearch",
     "onload",
     "onunload",
     "postcss",
+    "powerexplorer",
     "preact",
+    "regjsparser",
     "rescanning",
     "smol",
     "svelte",
@@ -57,11 +60,13 @@
     "unrs",
     "untracked",
     "unvalidated",
+    "vaultdex",
     "vitest",
     "wabt",
     "wasm",
     "wdio",
-    "wikilinks"
+    "wikilinks",
+    "xfoo"
   ],
   "ignoreRegExpList": [
     "/GHSA(-[0-9a-z]{4}){3}/g"
