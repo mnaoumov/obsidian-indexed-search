@@ -2,11 +2,11 @@
   "name": "indexed-search",
   "version": "0.0.0",
   "description": "Makes core Search fast on large vaults, with the same results, through a trigram index kept in IndexedDB.",
-  "type": "module",
-  "main": "main.js",
   "keywords": [],
   "license": "MIT",
   "author": "mnaoumov",
+  "type": "module",
+  "main": "main.js",
   "scripts": {
     "build": "jiti scripts/build.ts",
     "build:clean": "jiti scripts/build-clean.ts",
@@ -35,21 +35,21 @@
     "test:watch": "jiti scripts/test-watch.ts",
     "version": "jiti scripts/version.ts"
   },
-  "overrides": {
-    "typescript": "$typescript",
-    "@puppeteer/browsers": "^3.2.1",
-    "deepmerge-ts": "^8.0.2"
-  },
   "resolutions": {
-    "typescript": "6.0.3",
     "@puppeteer/browsers": "^3.2.1",
-    "deepmerge-ts": "^8.0.2"
+    "deepmerge-ts": "^8.0.2",
+    "typescript": "6.0.3"
+  },
+  "overrides": {
+    "@puppeteer/browsers": "^3.2.1",
+    "deepmerge-ts": "^8.0.2",
+    "typescript": "$typescript"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.4",
-    "@mnaoumov/obsidian-dev-toolkit": "^5.2.0",
+    "@mnaoumov/obsidian-dev-toolkit": "^6.0.0",
     "@mnaoumov/obsidian-lib": "^6.2.1",
-    "@mnaoumov/typescript-dev-toolkit": "^3.13.0",
+    "@mnaoumov/typescript-dev-toolkit": "^4.0.0",
     "@mnaoumov/typescript-lib": "^2.0.0",
     "@obsidian-typings/obsidian-public-latest": "^6.50.0",
     "@tsconfig/strictest": "^2.0.8",
