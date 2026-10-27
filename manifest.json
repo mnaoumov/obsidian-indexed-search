@@ -1,0 +1,11 @@
+{
+  "author": "mnaoumov",
+  "authorUrl": "https://github.com/mnaoumov/",
+  "description": "Makes core Search fast on large vaults, with the same results, through a trigram index kept in IndexedDB.",
+  "fundingUrl": "https://www.buymeacoffee.com/mnaoumov",
+  "id": "indexed-search",
+  "isDesktopOnly": false,
+  "minAppVersion": "1.14.5",
+  "name": "Indexed Search",
+  "version": "0.0.0"
+}
