@@ -19,7 +19,7 @@ None of them speeds up core Search itself while keeping its results. That is thi
 
 ## Current state
 
-The repo was generated on 2026-10-26 with `create-obsidian-plugin` (preset `all-in-one`, CSS, desktop and mobile, the unofficial API subset, no editor extensions). Its answers are in `.create-obsidian-plugin.json`, so re-running the generator in this folder updates every file not edited by hand. `src/` is still the generated sample; nothing below is built yet.
+The repo was generated on 2026-10-26 with `create-obsidian-plugin` (preset `all-in-one`, CSS, desktop and mobile, the unofficial API subset, no editor extensions). Its answers are in `.create-obsidian-plugin.json`, so re-running the generator in this folder updates every file not edited by hand. The plugin itself (`src/main.ts`, `src/plugin*.ts`) is still the generated sample. `src/prototypes/` holds the two measured engine prototypes and their benchmark. The engine is chosen, and the numbers are in "Engine decision" below; nothing else below is built yet.
 
 ## Design
 
@@ -82,7 +82,7 @@ Missing on both checked branches: `SearchView.queue`, `matchingCase`, `searchCom
 The target is a vault of 37,000 notes and 110 MB of text, and a search plugin that runs out of memory on it has failed. So:
 
 - **Postings are compact:** files as integer ids, sorted and delta-encoded in typed arrays. No token positions, because core's matcher re-reads the candidates anyway. No copies of note text, no stored excerpts, no JS array of strings or `Map` per trigram.
-- **The index is kept in IndexedDB, not in the heap:** one record per trigram (or per block of trigrams). A query reads only the records its own trigrams need.
+- **The index is kept in IndexedDB, not in the heap:** one record per trigram and segment of files, keyed `[trigram, segment]`, so one key-range read returns a trigram's whole list in id order. A query reads only the records its own trigrams need.
 - **Building never holds every file's text at once:** files are read, indexed and released in batches.
 - **A budget is set up front** for peak and steady heap, and the performance tests fail when it is exceeded. Set on 2026-10-28, before the first measurement, for the 37,000-note, 110 MB target vault. Each figure is what the engine ADDS to Obsidian's renderer over the same moment without it:
   - **Steady (at rest, after a forced GC): at most 64 MB**, counting the main isolate's JS heap, its `ArrayBuffer`s and every worker it keeps (process RSS). That is under 60% of the text size, so an engine that keeps the corpus resident cannot meet it.
@@ -107,6 +107,51 @@ Every claim above is measured on a generated vault of the target size (37,000 no
 - query latency against core Search without the plugin, for plain terms, phrases and regex.
 
 **The alternative is measured beside it:** keep every note's text in memory as UTF-8 in one shared buffer (about 110 MB) and brute-scan it in workers per query, the way `Everything`'s `content:` search answers instantly. It is exact by construction and its memory is predictable, but it holds all the text in the heap and has to fold non-Latin case over UTF-8 bytes. If it wins on the numbers, the plugin is built on it instead.
+
+### Engine decision: the trigram index (measured 2026-10-28)
+
+**The plugin is built on the trigram index in IndexedDB, not the in-memory brute scan.** The brute scan's resident text is about twice the steady budget, and the index fits it with room to spare. They tie on query speed, and both beat core Search by 5 to 30 times.
+
+`npm run test:integration:desktop:performance` re-measures both engines. It runs `src/prototypes/engine-benchmark.desktop-performance.integration.test.ts` in a real desktop Obsidian (1.14.5) against core Search with nothing patched. The prototypes live beside it in `src/prototypes/` and are loaded into the renderer as a bundled script, so the plugin build does not ship them. `INDEXED_SEARCH_TRIGRAM_SEGMENT_SIZE` overrides the trigram segment size, and `BULK_CORES` sets the brute scan's worker count (2 here).
+
+**The corpus** is the shared generator's 37,000 notes and exactly 110,000,000 UTF-8 bytes, with a 25% Cyrillic share. Its filler prose is rewritten by `scripts/helpers/varied-performance-vault.ts`, because the shared generator repeats ONE sentence per language: 6 distinct sentence heads across the whole vault, which leaves a trigram index a few dozen trigrams. The rewrite uses seeded Zipf-distributed words (20,000 per language) and 2% id-like tokens, and keeps every path and byte count. The result has 90,136 distinct trigrams. Needle terms are planted at known rates: `Quillwort` in 1% of the Latin notes, two spellings of the phrase `silver harbour lantern` in 0.33%, and `журавлина` in 1% of the Cyrillic notes. The vocabulary is synthetic, so a real vault's term distribution can still move these numbers. The shared generator should grow this option, and once it does this rewrite goes.
+
+**What one query costs**, as medians: core Search over every file, against each engine's candidate computation plus core Search restricted to those candidates. Core's timings are from the 8,192-segment run, with the OS file cache warm and the result pane rendering.
+
+| Query (core syntax) | Core matches | Core alone | Trigram, segment 8,192 | Trigram, segment 2,048 | Brute scan, 2 workers |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `quillwort` | 255 | 550 ms | 25 + 11 ms | 57 + 25 ms | 65 + 11 ms |
+| `"silver harbour lantern"` | 85 | 730 ms | 28 + 6 ms | 100 + 6 ms | 52 + 6 ms |
+| `llwor` (infix) | 255 | 584 ms | 24 + 10 ms | 63 + 10 ms | 83 + 27 ms |
+| `/silver harbou?r lantern/` | 170 | 719 ms | 14 + 9 ms | 79 + 10 ms | 90 + 9 ms |
+| `ЖУРАВЛИНА` (other case) | 85 | 416 ms | 25 + 5 ms | 61 + 7 ms | 47 + 6 ms |
+| `/[0-9]{5}/` (no trigram) | 2,261 | 737 ms | falls back: 765 ms | falls back: 820 ms | 89 + 189 ms |
+
+Every candidate set contained every file core matched, on every query and in every run.
+
+**What each engine holds**, as deltas over the same moment without it. `process.memoryUsage().arrayBuffers` reads 0 in Obsidian's renderer, so typed arrays are visible only in RSS, which also includes the workers.
+
+| | Trigram, segment 8,192 | Trigram, segment 2,048 | Brute scan | Budget |
+| --- | ---: | ---: | ---: | ---: |
+| Build time | 54 s | 201 s | 3.7 s, again on every start | |
+| Peak during build: JS heap / RSS | +32 MB / +446 MB | +33 MB / +287 MB | +15 MB / +216 MB | 256 MB |
+| At rest after GC: JS heap / RSS | ~0 / ~0 | ~0 / ~0 | ~0 / +126 to +166 MB | **64 MB** |
+| On disk (`navigator.storage` usage delta) | 71 MB | 93 MB | none | 220 MB |
+| IndexedDB records | 427,341 | 1,372,286 | | |
+| Restart: open / first answer | 10 ms / 19 ms | 73 ms / 128 ms | full re-read of every note | |
+
+The decision follows from those numbers:
+
+1. **Steady memory rules out the brute scan.** Its corpus stays resident (+126 to +166 MB RSS), two to two-and-a-half times the 64 MB steady budget. The index adds nothing measurable at rest.
+2. **Restart favours the index.** It is usable 19 ms after opening. The brute scan re-reads all 110 MB on every start: 3.7 s here with the OS cache warm. `Advanced Metadata Cache` measured 231 s for a first read after a copy, on a 78 MB vault.
+3. **Query speed is a tie.** Both answer in 20 to 110 ms, end to end, where core takes 0.4 to 0.8 s.
+4. **The index's weak spot is a regex with no required trigram.** It falls back to core's full scan (`/[0-9]{5}/`: about 0.77 s, the same as core). The brute scan answers that one in 278 ms. Such queries keep core's speed and lose nothing.
+
+What the real index takes from these numbers:
+
+1. **Use segments of 8,192 files.** Against 2,048, there are three times fewer records, the build is 3.7 times faster, the database is 24% smaller and candidates come back 2 to 5 times sooner.
+2. **The build's peak RSS is over budget, and the JS heap is not the cause.** The heap rose by only 32 MB. The extra RSS follows the size of each segment's single write transaction: +287 MB at 2,048 files, +446 MB at 8,192. Writing each segment in bounded batches of puts, each awaited, is the first thing to measure. A larger segment must not buy speed back with peak memory.
+3. **Delete common trigrams before they are written.** The prototype writes the posting lists and only then deletes the trigrams in 90% or more of the files. With document frequencies known only at the end, the real build needs a cheaper route: keep the counts, and drop or skip lists past the threshold as segments merge.
 
 ### Shared code
 
