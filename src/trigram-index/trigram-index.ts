@@ -161,6 +161,7 @@ export class TrigramIndex {
   private readonly damagedSegments = new Set<number>();
   private readonly entries = new Map<string, FileEntry>();
   private readonly filesStore: LocalDataStore;
+  private isClosed = false;
   private readonly log: (message: string) => void;
   private readonly minCommonFiles: number;
   private nextId = 0;
@@ -240,6 +241,7 @@ export class TrigramIndex {
    * Closes both stores. Writes still queued fail, and lose nothing a later {@link sync} does not redo.
    */
   public close(): void {
+    this.isClosed = true;
     this.filesStore.close();
     this.postingsStore.close();
   }
@@ -637,7 +639,8 @@ export class TrigramIndex {
   ): Promise<IndexedText[]> {
     const indexed: IndexedText[] = [];
     await forEachConcurrently(files, this.readConcurrency, async (file, index) => {
-      const text = await read(file);
+      // A closed index reads nothing more: its writes would fail, and the next start rereads what it skipped.
+      const text = this.isClosed ? null : await read(file);
       if (text === null) {
         return;
       }
@@ -659,7 +662,7 @@ export class TrigramIndex {
     const stale: string[] = [];
     await forEachConcurrently(live, this.readConcurrency, async (item) => {
       const current = stat(item.path);
-      const text = current?.mtime === item.entry.mtime && current.size === item.entry.size ? await read(current) : null;
+      const text = !this.isClosed && current?.mtime === item.entry.mtime && current.size === item.entry.size ? await read(current) : null;
       if (text === null) {
         stale.push(item.path);
       } else {
