@@ -84,7 +84,10 @@ The target is a vault of 37,000 notes and 110 MB of text, and a search plugin th
 - **Postings are compact:** files as integer ids, sorted and delta-encoded in typed arrays. No token positions, because core's matcher re-reads the candidates anyway. No copies of note text, no stored excerpts, no JS array of strings or `Map` per trigram.
 - **The index is kept in IndexedDB, not in the heap:** one record per trigram (or per block of trigrams). A query reads only the records its own trigrams need.
 - **Building never holds every file's text at once:** files are read, indexed and released in batches.
-- **A budget is set up front** for peak and steady heap, and the performance tests fail when it is exceeded.
+- **A budget is set up front** for peak and steady heap, and the performance tests fail when it is exceeded. Set on 2026-10-28, before the first measurement, for the 37,000-note, 110 MB target vault. Each figure is what the engine ADDS to Obsidian's renderer over the same moment without it:
+  - **Steady (at rest, after a forced GC): at most 64 MB**, counting the main isolate's JS heap, its `ArrayBuffer`s and every worker it keeps (process RSS). That is under 60% of the text size, so an engine that keeps the corpus resident cannot meet it.
+  - **Peak (during a full build): at most 256 MB** over the pre-build reading, on the same three counters.
+  - **On disk: at most 220 MB**, twice the text.
 
 ### Crash-safe persistence
 
