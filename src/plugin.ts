@@ -9,9 +9,32 @@ import { Notice } from 'obsidian';
 
 import { PluginSettingsComponent } from './plugin-settings-component.ts';
 import { PluginSettingsTab } from './plugin-settings-tab.ts';
+import { TrigramIndexComponent } from './trigram-index/trigram-index-component.ts';
 
 export class Plugin extends PluginBase {
+  /**
+   * The vault's trigram index, which narrows core Search to the files a query can match.
+   *
+   * @returns The index component.
+   * @throws If the plugin is not loaded.
+   */
+  public get trigramIndexComponent(): TrigramIndexComponent {
+    if (!this.trigramIndexComponentValue) {
+      throw new Error('The plugin is not loaded');
+    }
+    return this.trigramIndexComponentValue;
+  }
+
+  private trigramIndexComponentValue: null | TrigramIndexComponent = null;
+
   protected override async onloadImpl(): Promise<void> {
+    this.trigramIndexComponentValue = this.addChild(
+      new TrigramIndexComponent({
+        app: this.app,
+        pluginId: this.manifest.id
+      })
+    );
+
     const pluginSettingsComponent = this.addChild(
       new PluginSettingsComponent({
         dataHandler: new PluginDataHandler(this),

@@ -20,8 +20,8 @@ import type {
   ReadFile
 } from './trigram-index-engine.ts';
 
-import { foldText } from './case-folding.ts';
-import { unite } from './postings.ts';
+import { foldText } from '../trigram-index/case-folding.ts';
+import { unite } from '../trigram-index/postings.ts';
 
 /**
  * What a build reports.

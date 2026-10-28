@@ -10,7 +10,7 @@ import type { App } from 'obsidian';
 
 import type { BruteScanTerm } from './brute-scan-engine.ts';
 
-import { foldText } from './case-folding.ts';
+import { foldText } from '../trigram-index/case-folding.ts';
 
 /**
  * What one core Search run returned.
