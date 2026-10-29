@@ -51,7 +51,7 @@
     "@commitlint/cli": "^21.2.4",
     "@mnaoumov/obsidian-dev-toolkit": "^7.1.0",
     "@mnaoumov/obsidian-lib": "^7.1.0",
-    "@mnaoumov/typescript-dev-toolkit": "^5.0.0",
+    "@mnaoumov/typescript-dev-toolkit": "^5.2.0",
     "@mnaoumov/typescript-lib": "^2.0.0",
     "@obsidian-typings/obsidian-public-latest": "^6.50.0",
     "@tsconfig/strictest": "^2.0.8",
