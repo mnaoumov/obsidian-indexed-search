@@ -206,22 +206,21 @@ describe('trigram index recovery after a kill', () => {
 
   afterAll(async () => {
     await evalInObsidian({
-      async callback({ app, pluginId }) {
+      async callback({ app, folder, pluginId }) {
         const state = window.indexedSearchRecoveryTest;
         if (!state) {
           throw new Error('The recovery test state is missing');
         }
         state.restore();
-        for (const path of state.notePaths) {
-          const file = app.vault.getFileByPath(path);
-          if (file) {
-            await app.fileManager.trashFile(file);
-          }
+        // One trash of the whole folder: a trash per note took past the per-eval cap on a loaded machine.
+        const recoveryFolder = app.vault.getFolderByPath(folder);
+        if (recoveryFolder) {
+          await app.fileManager.trashFile(recoveryFolder);
         }
         Reflect.deleteProperty(window, 'indexedSearchRecoveryTest');
         await app.plugins.enablePlugin(pluginId);
       },
-      input: { pluginId: PLUGIN_ID },
+      input: { folder: FOLDER, pluginId: PLUGIN_ID },
       vaultPath
     });
   });
