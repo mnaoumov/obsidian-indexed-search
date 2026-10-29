@@ -84,6 +84,13 @@ export interface TrigramIndexConstructorParams {
    */
   readonly filesStore: LocalDataStore;
   /**
+   * How many per-path file records may wait in the journal before they are folded into the packed record of
+   * each segment. A restart reads every one of them, so the bound keeps it a handful of reads.
+   *
+   * @default 512
+   */
+  readonly journalLimit?: number;
+  /**
    * Receives one line for each notable event: a full-scan fallback, a damaged record, a rebuild.
    */
   readonly log: (message: string) => void;
@@ -145,8 +152,19 @@ interface StoredMeta {
   readonly version: number;
 }
 
+/**
+ * The live files of one segment, packed into one record: four parallel lists in ascending id order.
+ */
+interface StoredSegmentFiles {
+  readonly ids: Float64Array;
+  readonly mtimes: Float64Array;
+  readonly paths: readonly string[];
+  readonly sizes: Float64Array;
+}
+
 const DEFAULT_COMMON_SHARE = 0.9;
 const DEFAULT_COMPACT_SHARE = 0.25;
+const DEFAULT_JOURNAL_LIMIT = 512;
 const DEFAULT_MIN_COMMON_FILES = 1024;
 const DEFAULT_READ_CONCURRENCY = 4;
 const DEFAULT_SEGMENT_SIZE = 8192;
@@ -157,6 +175,7 @@ const HALF_DIVISOR = 2;
 const KEY_RADIX = 36;
 const META_KEY = 'meta';
 const SCHEMA_VERSION = 1;
+const SEGMENT_FILES_KEY_PREFIX = 's:';
 
 /**
  * The trigram index over a set of files.
@@ -167,9 +186,12 @@ export class TrigramIndex {
   private readonly compactedDeadCounts: number[] = [];
   private readonly compactShare: number;
   private readonly damagedSegments = new Set<number>();
+  private readonly dirtySegments = new Set<number>();
   private readonly entries = new Map<string, FileEntry>();
   private readonly filesStore: LocalDataStore;
   private isClosed = false;
+  private readonly journalLimit: number;
+  private readonly journalPaths = new Set<string>();
   private readonly log: (message: string) => void;
   private readonly minCommonFiles: number;
   private nextId = 0;
@@ -191,6 +213,7 @@ export class TrigramIndex {
     this.commonShare = params.commonShare ?? DEFAULT_COMMON_SHARE;
     this.compactShare = params.compactShare ?? DEFAULT_COMPACT_SHARE;
     this.filesStore = params.filesStore;
+    this.journalLimit = params.journalLimit ?? DEFAULT_JOURNAL_LIMIT;
     this.log = params.log;
     this.minCommonFiles = params.minCommonFiles ?? DEFAULT_MIN_COMMON_FILES;
     this.postingsStore = params.postingsStore;
@@ -300,12 +323,15 @@ export class TrigramIndex {
       this.entries.clear();
       this.paths.clear();
       this.damagedSegments.clear();
+      this.dirtySegments.clear();
+      this.journalPaths.clear();
       this.segmentTrigrams.length = 0;
       this.compactedDeadCounts.length = 0;
-      const meta = parseMeta(await this.filesStore.get(META_KEY));
+      // One read of the whole store: the metadata, one packed record per segment and the journal.
+      const records = await this.filesStore.entries();
+      const meta = parseMeta(records.find(([key]) => key === META_KEY)?.[1]);
       if (meta?.segmentSize !== this.segmentSize) {
-        const storedEntries = await this.filesStore.entries();
-        if (meta || storedEntries.length > 0) {
+        if (records.length > 0) {
           this.log('The trigram index metadata is missing, damaged or from another version; rebuilding the index.');
         }
         await this.clearStores();
@@ -313,7 +339,7 @@ export class TrigramIndex {
       }
       this.nextId = meta.nextId;
       this.commonTrigrams = new Set(meta.commonTrigrams);
-      await this.loadFileRecords();
+      await this.loadFileRecords(records);
       await this.loadSegmentTrigrams();
     });
   }
@@ -360,10 +386,10 @@ export class TrigramIndex {
       if (!entry) {
         return;
       }
-      await this.filesStore.commit({ entries: [[toFileKey(newPath), entry]], removedKeys: [toFileKey(oldPath)] });
       this.forget(oldPath);
       this.forget(newPath);
       this.remember(newPath, entry);
+      await this.commitFileChanges([oldPath, newPath]);
     });
   }
 
@@ -457,12 +483,68 @@ export class TrigramIndex {
     }
   }
 
+  /**
+   * Applies the journal over the files loaded from the segment records: every journal record is newer.
+   *
+   * @param journal - The per-path records, a `null` value for a removed path.
+   * @param damagedKeys - Receives the keys of the records that do not parse.
+   */
+  private applyJournal(journal: readonly (readonly [string, unknown])[], damagedKeys: string[]): void {
+    const journalIds = new Set<number>();
+    for (const [key, value] of journal) {
+      const path = key.slice(FILE_KEY_PREFIX.length);
+      this.forget(path);
+      if (value === null) {
+        this.journalPaths.add(path);
+        continue;
+      }
+      const entry = parseFileEntry(value, this.nextId);
+      if (!entry || journalIds.has(entry.id)) {
+        damagedKeys.push(key);
+        continue;
+      }
+      journalIds.add(entry.id);
+      this.journalPaths.add(path);
+      // A rename journals the new path under the old id while the segment record still names the old path.
+      const holder = this.paths.get(entry.id);
+      if (holder !== undefined) {
+        this.forget(holder);
+      }
+      this.remember(path, entry);
+    }
+  }
+
   private async clearStores(): Promise<void> {
     await this.filesStore.clear();
     await this.postingsStore.clear();
     this.commonTrigrams = new Set();
+    this.dirtySegments.clear();
+    this.journalPaths.clear();
     this.nextId = 0;
     await this.saveMeta();
+  }
+
+  /**
+   * Persists the in-memory records of some paths: as journal records while the journal has room, otherwise by
+   * folding the whole journal into the packed segment records. Either way it is one transaction.
+   *
+   * @param paths - The paths whose records changed, removed ones included.
+   * @returns A promise that resolves once the change commits.
+   */
+  private async commitFileChanges(paths: readonly string[]): Promise<void> {
+    if (paths.length === 0) {
+      return;
+    }
+    const addedCount = paths.filter((path) => !this.journalPaths.has(path)).length;
+    if (this.journalPaths.size + addedCount > this.journalLimit) {
+      await this.foldJournal([]);
+      return;
+    }
+    // A removed path keeps a `null` record, which hides whatever entry a segment record still holds for it.
+    await this.filesStore.commit({ entries: paths.map((path) => [toFileKey(path), this.entries.get(path) ?? null]) });
+    for (const path of paths) {
+      this.journalPaths.add(path);
+    }
   }
 
   private async commitRemovals(store: LocalDataStore, keys: readonly string[]): Promise<void> {
@@ -506,6 +588,41 @@ export class TrigramIndex {
     await this.commitRemovals(this.postingsStore, removedKeys);
   }
 
+  /**
+   * Writes the packed record of every segment whose files changed since the last fold, and deletes the whole
+   * journal, in one transaction.
+   *
+   * @param removedKeys - Further keys to delete in the same transaction.
+   * @returns A promise that resolves once the fold commits.
+   */
+  private async foldJournal(removedKeys: readonly string[]): Promise<void> {
+    const segmentFiles = new Map<number, [number, string][]>();
+    for (const segment of this.dirtySegments) {
+      segmentFiles.set(segment, []);
+    }
+    for (const [id, path] of this.paths) {
+      segmentFiles.get(this.getSegment(id))?.push([id, path]);
+    }
+    const entries: [string, StoredSegmentFiles][] = [];
+    const keys = [...removedKeys, ...[...this.journalPaths].map((path) => toFileKey(path))];
+    for (const [segment, files] of segmentFiles) {
+      if (files.length === 0) {
+        keys.push(toSegmentFilesKey(segment));
+        continue;
+      }
+      files.sort(([left], [right]) => left - right);
+      entries.push([toSegmentFilesKey(segment), {
+        ids: Float64Array.from(files, ([id]) => id),
+        mtimes: Float64Array.from(files, ([, path]) => this.entries.get(path)?.mtime ?? 0),
+        paths: files.map(([, path]) => path),
+        sizes: Float64Array.from(files, ([, path]) => this.entries.get(path)?.size ?? 0)
+      }]);
+    }
+    await this.filesStore.commit({ entries, removedKeys: keys });
+    this.dirtySegments.clear();
+    this.journalPaths.clear();
+  }
+
   private forget(path: string): void {
     const entry = this.entries.get(path);
     if (!entry) {
@@ -514,6 +631,7 @@ export class TrigramIndex {
 
     this.entries.delete(path);
     this.paths.delete(entry.id);
+    this.dirtySegments.add(this.getSegment(entry.id));
   }
 
   private getDeadCount(segment: number): number {
@@ -531,6 +649,10 @@ export class TrigramIndex {
       }
     }
     return Uint32Array.from(ids).sort();
+  }
+
+  private getSegment(id: number): number {
+    return Math.floor(id / this.segmentSize);
   }
 
   private getSegmentCount(): number {
@@ -572,22 +694,73 @@ export class TrigramIndex {
     return deadSinceRebuild > 0 && deadSinceRebuild >= this.compactShare * allocated;
   }
 
-  private async loadFileRecords(): Promise<void> {
-    const removedKeys: string[] = [];
-    for (const [key, value] of await this.filesStore.entries()) {
-      if (key === META_KEY) {
-        continue;
+  /**
+   * Rebuilds the in-memory records from the packed segment records, then applies the journal over them, since
+   * every journal record is newer than any segment record. A damaged record is dropped and its files indexed
+   * again; any damage, or a journal past its bound, folds the journal at once so the next start reads clean records.
+   *
+   * @param records - Every record of the files store.
+   * @returns A promise that resolves once the records are loaded.
+   */
+  private async loadFileRecords(records: readonly (readonly [string, unknown])[]): Promise<void> {
+    const damagedKeys: string[] = [];
+    const journal: (readonly [string, unknown])[] = [];
+    const segmentRecords: (readonly [string, unknown])[] = [];
+    for (const record of records) {
+      const [key] = record;
+      if (key.startsWith(FILE_KEY_PREFIX)) {
+        journal.push(record);
+      } else if (key !== META_KEY) {
+        segmentRecords.push(record);
       }
-      const entry = key.startsWith(FILE_KEY_PREFIX) ? parseFileEntry(value, this.nextId) : null;
-      const path = key.slice(FILE_KEY_PREFIX.length);
-      if (!entry || this.paths.has(entry.id)) {
-        this.log(`Dropping the damaged trigram index record ${key}; its file is indexed again.`);
-        removedKeys.push(key);
-        continue;
-      }
-      this.remember(path, entry);
     }
-    await this.commitRemovals(this.filesStore, removedKeys);
+    const damagedSegments = this.loadSegmentFiles(segmentRecords, damagedKeys);
+    this.dirtySegments.clear();
+    for (const segment of damagedSegments) {
+      this.dirtySegments.add(segment);
+    }
+    this.applyJournal(journal, damagedKeys);
+    for (const key of damagedKeys) {
+      this.log(`Dropping the damaged trigram index record ${key}; its files are indexed again.`);
+    }
+    if (damagedKeys.length > 0 || damagedSegments.size > 0 || this.journalPaths.size > this.journalLimit) {
+      await this.foldJournal(damagedKeys);
+    }
+  }
+
+  /**
+   * Remembers every file of the packed segment records.
+   *
+   * @param records - The records that are not metadata or journal.
+   * @param damagedKeys - Receives the keys of the records that do not parse.
+   * @returns The segments whose records must be rewritten, since a path appears in more than one.
+   */
+  private loadSegmentFiles(records: readonly (readonly [string, unknown])[], damagedKeys: string[]): Set<number> {
+    const damagedSegments = new Set<number>();
+    for (const [key, value] of records) {
+      const segment = key.startsWith(SEGMENT_FILES_KEY_PREFIX) ? parseSegmentNumber(key.slice(SEGMENT_FILES_KEY_PREFIX.length)) : null;
+      const segmentBase = (segment ?? 0) * this.segmentSize;
+      const files = segment === null ? null : parseSegmentFiles(value, segmentBase, Math.min(this.nextId, segmentBase + this.segmentSize));
+      if (segment === null || files === null) {
+        damagedKeys.push(key);
+        continue;
+      }
+      for (const [index, path] of files.paths.entries()) {
+        const entry: FileEntry = { id: files.ids[index] ?? 0, mtime: files.mtimes[index] ?? 0, size: files.sizes[index] ?? 0 };
+        const existing = this.entries.get(path);
+        if (existing) {
+          // A path in two segment records is damage; the newer id wins and both records are rewritten.
+          damagedSegments.add(segment);
+          damagedSegments.add(this.getSegment(existing.id));
+          if (existing.id > entry.id) {
+            continue;
+          }
+          this.forget(path);
+        }
+        this.remember(path, entry);
+      }
+    }
+    return damagedSegments;
   }
 
   private async loadSegmentTrigrams(): Promise<void> {
@@ -723,25 +896,24 @@ export class TrigramIndex {
   private remember(path: string, entry: FileEntry): void {
     this.entries.set(path, entry);
     this.paths.set(entry.id, path);
+    this.dirtySegments.add(this.getSegment(entry.id));
   }
 
   private async removeEntries(paths: readonly string[]): Promise<void> {
     const known = paths.filter((path) => this.entries.has(path));
-    await this.commitRemovals(this.filesStore, known.map((path) => toFileKey(path)));
     for (const path of known) {
       this.forget(path);
     }
+    await this.commitFileChanges(known);
   }
 
   private async saveEntries(indexed: readonly IndexedText[]): Promise<void> {
-    for (let start = 0; start < indexed.length; start += this.writeBatchSize) {
-      const batch = indexed.slice(start, start + this.writeBatchSize);
-      await this.filesStore.commit({ entries: batch.map(({ entry, path }) => [toFileKey(path), entry]) });
-      for (const { entry, path } of batch) {
-        this.forget(path);
-        this.remember(path, entry);
-      }
+    // The records are written after the postings they vouch for, so a file is never recorded without them.
+    for (const { entry, path } of indexed) {
+      this.forget(path);
+      this.remember(path, entry);
     }
+    await this.commitFileChanges(indexed.map(({ path }) => path));
   }
 
   private async saveMeta(): Promise<void> {
@@ -849,6 +1021,40 @@ function parseMeta(value: unknown): null | StoredMeta {
   return version !== SCHEMA_VERSION || !isNonNegativeInteger(nextId) || !isNonNegativeInteger(segmentSize) || !isTypedArray(commonTrigrams, 'Float64Array') ? null : { commonTrigrams, nextId, segmentSize, version };
 }
 
+function parseSegmentFiles(value: unknown, min: number, maxExclusive: number): null | StoredSegmentFiles {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  const { ids, mtimes, paths, sizes } = value as Partial<Record<keyof StoredSegmentFiles, unknown>>;
+  if (
+    !isTypedArray(ids, 'Float64Array') || !isTypedArray(mtimes, 'Float64Array') || !isTypedArray(sizes, 'Float64Array')
+    || !Array.isArray(paths)
+  ) {
+    return null;
+  }
+  const count = paths.length;
+  if (ids.length !== count || mtimes.length !== count || sizes.length !== count) {
+    return null;
+  }
+  let previousId = min - 1;
+  for (let index = 0; index < count; index++) {
+    const id = ids[index] ?? -1;
+    if (
+      !Number.isSafeInteger(id) || id <= previousId || id >= maxExclusive || typeof paths[index] !== 'string'
+      || !Number.isFinite(mtimes[index]) || !isNonNegativeInteger(sizes[index])
+    ) {
+      return null;
+    }
+    previousId = id;
+  }
+  return { ids, mtimes, paths: paths as string[], sizes };
+}
+
+function parseSegmentNumber(text: string): null | number {
+  const segment = Number(text);
+  return isNonNegativeInteger(segment) && String(segment) === text ? segment : null;
+}
+
 function toCompactedKey(segment: number): string {
   return `d:${String(segment)}`;
 }
@@ -859,6 +1065,10 @@ function toFileKey(path: string): string {
 
 function toPostingKey(trigram: number, segment: number): string {
   return `p:${trigram.toString(KEY_RADIX)}:${String(segment)}`;
+}
+
+function toSegmentFilesKey(segment: number): string {
+  return `${SEGMENT_FILES_KEY_PREFIX}${String(segment)}`;
 }
 
 function toSegmentKey(segment: number): string {

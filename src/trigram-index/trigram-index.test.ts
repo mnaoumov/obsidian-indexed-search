@@ -129,6 +129,11 @@ function sampleVault(): FakeVault {
   });
 }
 
+async function storedKeys(store: LocalDataStore): Promise<string[]> {
+  const records = await store.entries();
+  return records.map(([key]) => key);
+}
+
 describe('TrigramIndex', () => {
   it('narrows plain, infix and other-case terms to the files that contain them', async () => {
     const vault = sampleVault();
@@ -335,24 +340,96 @@ describe('TrigramIndex', () => {
     expect(c && index.isIndexed(c)).toBe(true);
   });
 
-  it('never misses a match, whichever write a kill interrupts', async () => {
+  it('keeps file records packed per segment, with renames, removals and updates kept in the journal between folds', async () => {
+    const factory = new IDBFactory();
+    const vault = sampleVault();
+    const options: IndexOptions = { ...SMALL_SEGMENT, journalLimit: 2 };
+    const first = await openHarness(factory, options);
+    await first.index.sync(vault.list(), vault.read);
+    vault.write('a.md', 'no longer about plants');
+    vault.rename('e.md', 'moved/e.md');
+    vault.delete('b.md');
+    await first.index.sync(vault.list(), vault.read);
+    await first.index.rename('e.md', 'moved/e.md');
+    const keys = await storedKeys(first.filesStore);
+    expect(keys.filter((key) => key.startsWith('s:'))).toEqual(['s:0', 's:1', 's:2']);
+    expect(keys.filter((key) => key.startsWith('f:')).length).toBeLessThanOrEqual(2);
+    first.index.close();
+
+    const second = await openHarness(factory, options);
+    vault.reads.length = 0;
+    await second.index.sync(vault.list(), vault.read);
+    expect(vault.reads).toEqual([]);
+    expect(second.index.getIndexedFileCount()).toBe(7);
+    expect(await candidatePaths(second.index, vault, 'quillwort')).toEqual(['moved/e.md']);
+    expect(await candidatePaths(second.index, vault, 'plants')).toEqual(['a.md']);
+  });
+
+  it('folds a journal past its limit when it loads', async () => {
+    const factory = new IDBFactory();
+    const vault = sampleVault();
+    const first = await openHarness(factory);
+    await first.index.sync(vault.list(), vault.read);
+    const keys = await storedKeys(first.filesStore);
+    expect(keys.filter((key) => key.startsWith('f:'))).toHaveLength(8);
+    first.index.close();
+
+    const second = await openHarness(factory, { ...SMALL_SEGMENT, journalLimit: 2 });
+    expect(await storedKeys(second.filesStore)).toEqual(['meta', 's:0', 's:1']);
+    vault.reads.length = 0;
+    await second.index.sync(vault.list(), vault.read);
+    expect(vault.reads).toEqual([]);
+    expect(await candidatePaths(second.index, vault, 'quillwort')).toEqual(['a.md', 'e.md']);
+  });
+
+  it('drops a damaged segment file record and indexes its files again', async () => {
+    const factory = new IDBFactory();
+    const vault = sampleVault();
+    const options: IndexOptions = { ...SMALL_SEGMENT, journalLimit: 0 };
+    const first = await openHarness(factory, options);
+    await first.index.sync(vault.list(), vault.read);
+    await first.filesStore.set('s:0', { ids: new Float64Array([1, 0]), mtimes: new Float64Array(2), paths: ['a.md', 'b.md'], sizes: new Float64Array(2) });
+    first.index.close();
+
+    const second = await openHarness(factory, options);
+    expect(second.logs.some((line) => line.includes('record s:0'))).toBe(true);
+    expect(second.index.getIndexedFileCount()).toBe(4);
+    vault.reads.length = 0;
+    await second.index.sync(vault.list(), vault.read);
+    expect(vault.reads.sort()).toEqual(['a.md', 'b.md', 'c.md', 'd.md']);
+    expect(await candidatePaths(second.index, vault, 'quillwort')).toEqual(['a.md', 'e.md']);
+    second.index.close();
+
+    const third = await openHarness(factory, options);
+    expect(third.logs).toEqual([]);
+    expect(third.index.getIndexedFileCount()).toBe(8);
+  });
+
+  it.each([
+    { name: 'in the journal', options: SMALL_SEGMENT },
+    { name: 'folded into segments', options: { ...SMALL_SEGMENT, journalLimit: 1 } }
+  ])('never misses a match, whichever write a kill interrupts (file records $name)', async ({ options }) => {
     const terms = ['quillwort', 'harbour', 'журавлина', 'again', 'note'];
     let writeCount = Infinity;
     for (let budget = 0; budget < writeCount; budget++) {
       const factory = new IDBFactory();
       const vault = sampleVault();
-      const crashing = await openHarness(factory);
+      const crashing = await openHarness(factory, options);
       const writes = killAfterWrites([crashing.filesStore, crashing.postingsStore], budget);
       await crashing.index.sync(vault.list(), vault.read).catch(() => undefined);
       vault.write('a.md', 'an update with no plants');
       const stat = vault.stat('a.md');
       await crashing.index.update(stat ? [stat] : [], vault.read).catch(() => undefined);
+      vault.rename('d.md', 'renamed.md');
+      await crashing.index.rename('d.md', 'renamed.md').catch(() => undefined);
+      vault.delete('b.md');
+      await crashing.index.remove(['b.md']).catch(() => undefined);
       if (writes.getCount() <= budget) {
         writeCount = writes.getCount();
       }
       crashing.index.close();
 
-      const restarted = await openHarness(factory);
+      const restarted = await openHarness(factory, options);
       for (const term of terms) {
         expect(await candidatePaths(restarted.index, vault, term)).toEqual(expect.arrayContaining(vault.matching(term)));
       }
