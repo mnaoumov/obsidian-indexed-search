@@ -5,7 +5,10 @@
  * forced garbage collection. They run only in the desktop renderer, under the desktop performance suite.
  */
 
-import type { SearchView } from '@obsidian-typings/obsidian-public-latest';
+import type {
+  SearchQueueStartOptions,
+  SearchView
+} from '@obsidian-typings/obsidian-public-latest';
 import type { App } from 'obsidian';
 
 import type { BruteScanTerm } from './brute-scan-engine.ts';
@@ -30,30 +33,6 @@ export interface RunCoreSearchParams {
    */
   readonly candidatePaths: null | ReadonlySet<string>;
   readonly query: string;
-}
-
-interface SearchComponentInternals {
-  readonly setValue: (value: string) => void;
-}
-
-interface SearchQueueComponent {
-  // eslint-disable-next-line typescript-dev-toolkit/readonly-interface-members -- the benchmark wraps `start` for one run and restores it.
-  start: (options?: SearchQueueStartOptions) => unknown;
-}
-
-interface SearchQueueStartOptions {
-  readonly onStop?: () => void;
-}
-
-/**
- * The members of the search view and its queue component the benchmark drives.
- *
- * TODO: obsidian-typings does not declare `SearchView.queue` or `SearchView.searchComponent` yet; they are
- * reported in its `AGENTS.md`. This benchmark-only shape goes once they ship.
- */
-interface SearchViewInternals {
-  readonly queue: SearchQueueComponent;
-  readonly searchComponent: SearchComponentInternals;
 }
 
 /**
@@ -93,7 +72,7 @@ export async function runCoreSearch(params: RunCoreSearchParams): Promise<CoreSe
     component.start = originalStart;
   }
   const stopped = new Promise<void>((resolve) => {
-    component.start = (options?: SearchQueueStartOptions): unknown => {
+    component.start = (options?: SearchQueueStartOptions): ReturnType<typeof originalStart> => {
       if (candidatePaths) {
         // The queue component lists the files synchronously inside `start`; swapping the list only there is
         // What the plugin's own hook would do to the queue's first batch.
@@ -127,7 +106,7 @@ export async function runCoreSearch(params: RunCoreSearchParams): Promise<CoreSe
   };
 }
 
-async function getSearchView(app: App): Promise<SearchView & SearchViewInternals> {
+async function getSearchView(app: App): Promise<SearchView> {
   let leaf = app.workspace.getLeavesOfType('search')[0];
   if (!leaf) {
     app.internalPlugins.getEnabledPluginById('global-search')?.openGlobalSearch('');
@@ -137,5 +116,5 @@ async function getSearchView(app: App): Promise<SearchView & SearchViewInternals
     throw new Error('Core Search view is not available');
   }
   await app.workspace.revealLeaf(leaf);
-  return leaf.view as SearchView & SearchViewInternals;
+  return leaf.view as SearchView;
 }
