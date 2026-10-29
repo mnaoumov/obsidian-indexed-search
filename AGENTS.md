@@ -19,7 +19,9 @@ None of them speeds up core Search itself while keeping its results. That is thi
 
 ## Current state
 
-The repo was generated on 2026-10-26 with `create-obsidian-plugin` (preset `all-in-one`, CSS, desktop and mobile, the unofficial API subset, no editor extensions). Its answers are in `.create-obsidian-plugin.json`, so re-running the generator in this folder updates every file not edited by hand. The plugin itself (`src/main.ts`, `src/plugin*.ts`) is still the generated sample. `src/prototypes/` holds the two measured engine prototypes and their benchmark. The engine is chosen, and the numbers are in "Engine decision" below; nothing else below is built yet.
+The repo was generated on 2026-10-26 with `create-obsidian-plugin` (preset `all-in-one`, CSS, desktop and mobile, the unofficial API subset, no editor extensions). Its answers are in `.create-obsidian-plugin.json`, so re-running the generator in this folder updates every file not edited by hand. Apart from the index, the plugin (`src/main.ts`, `src/plugin*.ts`) is still the generated sample. `src/prototypes/` holds the two measured engine prototypes and their benchmark; the engine is chosen, and the numbers are in "Engine decision" below.
+
+**Built:** the persistent trigram index, in `src/trigram-index/` (see "The index as built" below). The plugin opens it at layout ready and keeps it current. **Not built yet:** the core-Search hook and the query translation that feed it, so the index narrows nothing a user sees yet.
 
 ## Design
 
@@ -82,7 +84,7 @@ Missing on both checked branches: `SearchView.queue`, `matchingCase`, `searchCom
 The target is a vault of 37,000 notes and 110 MB of text, and a search plugin that runs out of memory on it has failed. So:
 
 - **Postings are compact:** files as integer ids, sorted and delta-encoded in typed arrays. No token positions, because core's matcher re-reads the candidates anyway. No copies of note text, no stored excerpts, no JS array of strings or `Map` per trigram.
-- **The index is kept in IndexedDB, not in the heap:** one record per trigram and segment of files, keyed `[trigram, segment]`, so one key-range read returns a trigram's whole list in id order. A query reads only the records its own trigrams need.
+- **The index is kept in IndexedDB, not in the heap:** one record per trigram and segment of files, so a query reads only the records its own trigrams need, one per segment whose trigram list names it.
 - **Building never holds every file's text at once:** files are read, indexed and released in batches.
 - **A budget is set up front** for peak and steady heap, and the performance tests fail when it is exceeded. Set on 2026-10-28, before the first measurement, for the 37,000-note, 110 MB target vault. Each figure is what the engine ADDS to Obsidian's renderer over the same moment without it:
   - **Steady (at rest, after a forced GC): at most 64 MB**, counting the main isolate's JS heap, its `ArrayBuffer`s and every worker it keeps (process RSS). That is under 60% of the text size, so an engine that keeps the corpus resident cannot meet it.
@@ -153,6 +155,17 @@ What the real index takes from these numbers:
 2. **The build's peak RSS is over budget, and the JS heap is not the cause.** The heap rose by only 32 MB. The extra RSS follows the size of each segment's single write transaction: +287 MB at 2,048 files, +446 MB at 8,192. Writing each segment in bounded batches of puts, each awaited, is the first thing to measure. A larger segment must not buy speed back with peak memory.
 3. **Delete common trigrams before they are written.** The prototype writes the posting lists and only then deletes the trigrams in 90% or more of the files. With document frequencies known only at the end, the real build needs a cheaper route: keep the counts, and drop or skip lists past the threshold as segments merge.
 
+### The index as built
+
+`src/trigram-index/trigram-index.ts` (`TrigramIndex`) is the engine, with no Obsidian dependency; `trigram-index-component.ts` (`TrigramIndexComponent`, the plugin's `trigramIndexComponent`) wires it to the vault. The query side calls `selectCandidates(files, query)`, which keeps every non-Markdown file, every file whose stats differ from its record, and every indexed file the postings do not rule out.
+
+- **Storage** is two obsidian-lib `LocalDataStore`s per vault (`app.appId`): `trigram-files-v1` holds the metadata (`meta`: schema version, segment size, next id, common trigrams) and one record per indexed path (`f:<path>` → id, mtime, size); `trigram-postings-v1` holds one record per trigram and segment (`p:<trigram base 36>:<segment>` → delta varints from the segment's first id), each segment's sorted trigram list (`t:<segment>`) and its dead-id count at the last rebuild (`d:<segment>`). A query reads one `get` per trigram per segment whose list names it.
+- **Ids are append-only.** A changed file is indexed again under a new id at the end, and its old id dies when its file record names the new one; a dead id maps to no path, so its stale postings add nothing. Every batch reserves its ids in `meta`, writes the segment's trigram list, then the postings, and the file records last. That order is the whole crash-safety argument: a kill at any write leaves only postings nobody names, or a list naming records that do not exist, never a file recorded as indexed without its postings. The unit suite cuts off every single write of a build and an update in turn and checks that nothing a term matches is ever missing.
+- **The build** goes segment by segment, reading four files at a time, packing `(trigram, file)` pairs into a `Uint32Array` (a `Float64Array` only past 2^32 packed values), and committing posting records in batches of 1,024. A trigram in 90% of the files read so far (once at least 1,024 are) becomes "every file": its current list is never written, and its earlier segments' records are deleted.
+- **Damage:** a posting record that does not decode as ascending ids inside its segment, or a missing or unsorted trigram list, makes every file of that segment a candidate, deletes the list so a restart sees the same, and logs one line; `maintain` then rebuilds that segment from its files under the same ids. Damaged metadata clears both stores; a damaged file record is dropped and its file indexed again. `maintain` also rebuilds a segment once 25% of its ids died since its last rebuild.
+- **Live changes:** create and modify queue the path (debounced 500 ms); delete forgets the record; rename moves it without a read. A file is a candidate from the moment its stats change, so a query never waits for an update.
+- **Not reused: `IncrementalFileIndexComponent`.** It keeps every file's projection in a heap map and persists the whole map per flush; here the per-file record must commit after that file's postings, in the same ordered batch, and nothing per file may stay in the heap beyond its id and stats. Case folding stays local too, because it models non-Unicode `RegExp` `i` canonicalization, which nothing in `Advanced Metadata Cache` does.
+
 ### Shared code
 
-Obsidian's word class and case folding, the file-change pipeline (re-reading only files whose `mtime` or `size` changed, debounced saves) and the performance-vault generator already exist in `Advanced Metadata Cache` (`advanced-metadata-cache`). They are moved into `@mnaoumov/obsidian-lib` and consumed from there, never copied.
+Obsidian's word class and the performance-vault generator come from `@mnaoumov/obsidian-lib` and `@mnaoumov/obsidian-dev-toolkit`, never copied; the device-local store is obsidian-lib's `LocalDataStore`. The file-change pipeline and the case folding are this plugin's own, for the reasons in "The index as built".
