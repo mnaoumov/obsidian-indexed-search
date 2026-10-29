@@ -143,6 +143,17 @@ export function andQuery(queries: readonly TrigramQuery[]): TrigramQuery {
 }
 
 /**
+ * Tells whether a text may satisfy a query: whether it holds the trigrams the query requires of it.
+ *
+ * @param query - The query.
+ * @param text - The text, unfolded.
+ * @returns `false` only when no match of the query's term can be in the text.
+ */
+export function canTextSatisfy(query: TrigramQuery, text: string): boolean {
+  return createTextChecker(query)(text);
+}
+
+/**
  * Collects every trigram a query refers to.
  *
  * @param query - The query.
@@ -167,6 +178,47 @@ export function collectTrigrams(query: TrigramQuery, trigrams = new Set<number>(
     }
   }
   return trigrams;
+}
+
+/**
+ * Returns a {@link canTextSatisfy} bound to one query, which collects the query's trigrams once for many texts.
+ *
+ * @param query - The query.
+ * @returns A check of one unfolded text.
+ */
+export function createTextChecker(query: TrigramQuery): (text: string) => boolean {
+  const wanted = collectTrigrams(query);
+  return (text) => doesTrigramSetSatisfy(query, findTrigrams(text, wanted));
+}
+
+/**
+ * Returns which of the given trigrams a text contains, after folding. It runs once per file path on every
+ * search, so it folds code units in place and allocates nothing per text but the result.
+ *
+ * @param text - The text, unfolded.
+ * @param wanted - The trigrams to look for.
+ * @returns The wanted trigrams the text contains.
+ */
+export function findTrigrams(text: string, wanted: ReadonlySet<number>): Set<number> {
+  const found = new Set<number>();
+  if (wanted.size === 0) {
+    return found;
+  }
+  const foldTable = getFoldTable();
+  let first = 0;
+  let second = 0;
+  for (let index = 0; index < text.length; index++) {
+    const third = foldTable[text.charCodeAt(index)] ?? 0;
+    if (index >= TRIGRAM_LENGTH - 1) {
+      const trigram = packTrigram(first, second, third);
+      if (wanted.has(trigram)) {
+        found.add(trigram);
+      }
+    }
+    first = second;
+    second = third;
+  }
+  return found;
 }
 
 /**
@@ -278,6 +330,29 @@ export function unpackTrigram(trigram: number): string {
 
 function assertNever(value: never): never {
   throw new Error(`Unexpected value: ${JSON.stringify(value)}`);
+}
+
+function doesTrigramSetSatisfy(query: TrigramQuery, trigrams: ReadonlySet<number>): boolean {
+  switch (query.kind) {
+    case 'all': {
+      return true;
+    }
+    case 'and': {
+      return query.children.every((child) => doesTrigramSetSatisfy(child, trigrams));
+    }
+    case 'none': {
+      return false;
+    }
+    case 'or': {
+      return query.children.some((child) => doesTrigramSetSatisfy(child, trigrams));
+    }
+    case 'trigram': {
+      return trigrams.has(query.trigram);
+    }
+    default: {
+      return assertNever(query);
+    }
+  }
 }
 
 function foldedLiteralQuery(folded: string): TrigramQuery {

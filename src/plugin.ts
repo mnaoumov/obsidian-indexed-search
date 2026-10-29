@@ -18,6 +18,7 @@ import {
 } from './api/indexed-search-api.ts';
 import { PluginSettingsComponent } from './plugin-settings-component.ts';
 import { PluginSettingsTab } from './plugin-settings-tab.ts';
+import { SearchNarrowingComponent } from './search/search-narrowing-component.ts';
 import { TrigramIndexComponent } from './trigram-index/trigram-index-component.ts';
 
 export class Plugin extends PluginBase {
@@ -68,6 +69,13 @@ export class Plugin extends PluginBase {
       new TrigramIndexComponent({
         app: this.app,
         pluginId: this.manifest.id
+      })
+    );
+
+    this.addChild(
+      new SearchNarrowingComponent({
+        app: this.app,
+        trigramIndexComponent: this.trigramIndexComponentValue
       })
     );
 
