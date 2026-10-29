@@ -72,12 +72,18 @@ const BRUTE_SCAN_READ_BATCH_SIZE = 256;
 const DEFAULT_WORKER_COUNT = 2;
 const WORKER_COUNT = Math.max(1, Number(process.env['BULK_CORES'] ?? DEFAULT_WORKER_COUNT));
 
+/**
+ * The queries, built on the generator's planted terms, whose document frequencies are exact: filler note `i` holds
+ * `zq<n>x` for every power of ten `n` dividing `i`, as consecutive words of its first sentence. So `zq100x`, the
+ * phrase `zq10x zq100x` and `/zq100?0x/` each match one filler note in 100, `q1000` (inside `zq1000x` and `zq10000x`)
+ * one in 1,000, and the planted terms sit in the Cyrillic notes as well as the Latin ones.
+ */
 const QUERIES: readonly BenchmarkQuery[] = [
-  { coreQuery: 'quillwort', label: 'plain term', term: { kind: 'literal', text: 'quillwort' } },
-  { coreQuery: '"silver harbour lantern"', label: 'phrase', term: { kind: 'literal', text: 'silver harbour lantern' } },
-  { coreQuery: 'llwor', label: 'infix substring', term: { kind: 'literal', text: 'llwor' } },
-  { coreQuery: '/silver harbou?r lantern/', label: 'regex', term: { kind: 'regex', source: 'silver harbou?r lantern' } },
-  { coreQuery: 'ЖУРАВЛИНА', label: 'Cyrillic term, other case', term: { kind: 'literal', text: 'ЖУРАВЛИНА' } },
+  { coreQuery: 'zq100x', label: 'plain term', term: { kind: 'literal', text: 'zq100x' } },
+  { coreQuery: '"zq10x zq100x"', label: 'phrase', term: { kind: 'literal', text: 'zq10x zq100x' } },
+  { coreQuery: 'q1000', label: 'infix substring', term: { kind: 'literal', text: 'q1000' } },
+  { coreQuery: '/zq100?0x/', label: 'regex', term: { kind: 'regex', source: 'zq100?0x' } },
+  { coreQuery: 'ZQ100X', label: 'term, other case', term: { kind: 'literal', text: 'ZQ100X' } },
   { coreQuery: '/[0-9]{5}/', label: 'regex with no required trigram', term: { kind: 'regex', source: '[0-9]{5}' } }
 ];
 
@@ -215,7 +221,7 @@ describe('engine benchmark on the 37,000-note corpus', () => {
         const engine = new api.TrigramIndexEngine({ commonShare, databaseName, segmentSize });
         await engine.open();
         const openInMilliseconds = performance.now() - startTime;
-        await engine.candidates(api.literalQuery('quillwort'));
+        await engine.candidates(api.literalQuery('zq100x'));
         const firstQueryInMilliseconds = performance.now() - startTime;
         api.collectGarbage();
         const resting = api.measureMemory();

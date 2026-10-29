@@ -116,7 +116,9 @@ Every claim above is measured on a generated vault of the target size (37,000 no
 
 `npm run test:integration:desktop:performance` re-measures both engines. It runs `src/prototypes/engine-benchmark.desktop-performance.integration.test.ts` in a real desktop Obsidian (1.14.5) against core Search with nothing patched. The prototypes live beside it in `src/prototypes/` and are loaded into the renderer as a bundled script, so the plugin build does not ship them. `INDEXED_SEARCH_TRIGRAM_SEGMENT_SIZE` overrides the trigram segment size, and `BULK_CORES` sets the brute scan's worker count (2 here).
 
-**The corpus** is the shared generator's 37,000 notes and exactly 110,000,000 UTF-8 bytes, with a 25% Cyrillic share. Its filler prose is rewritten by `scripts/helpers/varied-performance-vault.ts`, because the shared generator repeats ONE sentence per language: 6 distinct sentence heads across the whole vault, which leaves a trigram index a few dozen trigrams. The rewrite uses seeded Zipf-distributed words (20,000 per language) and 2% id-like tokens, and keeps every path and byte count. The result has 90,136 distinct trigrams. Needle terms are planted at known rates: `Quillwort` in 1% of the Latin notes, two spellings of the phrase `silver harbour lantern` in 0.33%, and `журавлина` in 1% of the Cyrillic notes. The vocabulary is synthetic, so a real vault's term distribution can still move these numbers. The shared generator should grow this option, and once it does this rewrite goes.
+**The corpus** is the shared generator's 37,000 notes and exactly 110,000,000 UTF-8 bytes, with a 25% Cyrillic share, generated with `prose: 'varied'` (`@mnaoumov/obsidian-dev-toolkit` 7.3.0 and later; `scripts/vitest-global-setup-performance.ts`). Its 34,000 filler notes draw seeded, Zipf-distributed words from a synthetic 20,000-word vocabulary per language, with a 2% tail of rare tokens (`rareTokenShare`: id-like tokens and frequency-weighted letter words), and filler note `i` holds the planted term `zq<n>x` for every power of ten `n` dividing `i`, as consecutive words of its first sentence. So every query's match count is known exactly: `zq100x`, the phrase `"zq10x zq100x"` and `/zq100?0x/` match 340 notes, and `q1000` matches 34. The planted terms are ASCII, so the other-case query is `ZQ100X`; Cyrillic case folding is covered by the unit tests, not the benchmark. The rare tokens carry digits, so `/[0-9]{5}/` matches 10,925 notes, a count the benchmark measures rather than predicts. The corpus holds 84,211 distinct trigrams. Without the rare-token tail (7.2.0, or `rareTokenShare: 0`) its consonant-vowel vocabulary gave only 6,959, so every trigram had long posting lists in every segment.
+
+The engine decision below was measured on an earlier, local rewrite of the same corpus: random letters weighted by frequency, plus 2% id-like tokens, giving 90,136 distinct trigrams, with its own planted needles (`quillwort`, `silver harbour lantern`, `журавлина`). That rewrite was dropped once the shared generator had varied prose. "Re-measured on the shared varied prose" further down has the current numbers.
 
 **What one query costs**, as medians: core Search over every file, against each engine's candidate computation plus core Search restricted to those candidates. Core's timings are from the 8,192-segment run, with the OS file cache warm and the result pane rendering.
 
@@ -154,6 +156,23 @@ What the real index takes from these numbers:
 1. **Use segments of 8,192 files.** Against 2,048, there are three times fewer records, the build is 3.7 times faster, the database is 24% smaller and candidates come back 2 to 5 times sooner.
 2. **The build's peak RSS is over budget, and the JS heap is not the cause.** The heap rose by only 32 MB. The extra RSS follows the size of each segment's single write transaction: +287 MB at 2,048 files, +446 MB at 8,192. Writing each segment in bounded batches of puts, each awaited, is the first thing to measure. A larger segment must not buy speed back with peak memory.
 3. **Delete common trigrams before they are written.** The prototype writes the posting lists and only then deletes the trigrams in 90% or more of the files. With document frequencies known only at the end, the real build needs a cheaper route: keep the counts, and drop or skip lists past the threshold as segments merge.
+
+### Re-measured on the shared varied prose (2026-10-29)
+
+The same benchmark, on the toolkit's `prose: 'varied'` corpus (7.3.0, with its rare-token tail). The trigram segment size is 8,192, the brute scan has 2 workers, and the machine had other bulk work running. The table gives the medians of two runs, with the candidate time first and the restricted core time second.
+
+| Query (core syntax) | Core matches | Core alone | Trigram | Brute scan |
+| --- | ---: | ---: | ---: | ---: |
+| `zq100x` | 340 | 633 to 787 ms | 64 to 68 + 27 to 28 ms | 83 to 113 + 25 to 27 ms |
+| `"zq10x zq100x"` | 340 | 647 to 653 ms | 56 to 95 + 23 to 27 ms | 51 to 58 + 26 to 30 ms |
+| `q1000` (infix) | 34 | 556 to 564 ms | 62 to 106 + 5 to 6 ms | 87 to 136 + 4 ms |
+| `/zq100?0x/` | 340 | 588 to 602 ms | 57 to 58 + 24 to 26 ms | 96 to 123 + 27 to 30 ms |
+| `ZQ100X` (other case) | 340 | 530 to 854 ms | 63 to 68 + 21 to 28 ms | 79 to 96 + 24 to 27 ms |
+| `/[0-9]{5}/` (no trigram) | 10,925 | 1.6 to 2.3 s | falls back: 1.7 to 2.6 s | 0.1 + 1.0 to 1.7 s |
+
+Every candidate set again contained every file core matched. `q1000` gives the trigram index 46 candidates for 34 matches, because rare tokens hold its trigrams apart. The prototype's build took 56 to 63 s and wrote 289,740 records, 20 to 38 MiB on disk. Restart took 64 to 81 ms to open the index and 110 to 145 ms to the first answer. The brute scan built in 3.8 to 4.0 s, peaked at +212 to +225 MiB RSS and kept +120 to +123 MiB at rest. So the decision stands: the brute scan's resident text is still about twice the 64 MiB steady budget, and the two engines still tie on query speed.
+
+**The real index's peak build RSS is unstable on this corpus.** `trigram-index-budget.desktop-performance.integration.test.ts` measured +300 MiB in one run, which failed the 256 MiB budget, and +86 MiB in the next, which passed every assertion. Its JS heap rose by 26 to 47 MiB, its build took 220 to 273 s, it used 47 to 49 MiB on disk, and its restart took 0.65 to 0.73 s with no note read. On 7.2.0's corpus, with no rare-token tail, the same test measured +311 and +254 MiB.
 
 ### The index as built
 

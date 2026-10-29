@@ -69,7 +69,7 @@ describe('the trigram index on the 37,000-note corpus', () => {
 
   it('builds within the peak, steady and disk budgets, and restarts quickly without rereading', async () => {
     const measured = await evalInObsidian({
-      async callback({ app, pluginId, query, storeIds }) {
+      async callback({ app, pluginId, query, storeIds, term }) {
         const api = window.indexedSearchBenchmark?.benchmarkApi;
         if (!api) {
           throw new Error('The benchmark bundle is not loaded');
@@ -121,7 +121,7 @@ describe('the trigram index on the 37,000-note corpus', () => {
             continue;
           }
           const text = await app.vault.cachedRead(file);
-          if (text.toLowerCase().includes('quillwort')) {
+          if (text.toLowerCase().includes(term)) {
             missing.push(file.path);
           }
         }
@@ -159,7 +159,8 @@ describe('the trigram index on the 37,000-note corpus', () => {
           storageUsageDelta: (storageAfter.usage ?? 0) - (storageBefore.usage ?? 0)
         };
       },
-      input: { pluginId: PLUGIN_ID, query: literalQuery('quillwort'), storeIds: STORE_IDS },
+      // The generator plants `zq100x` in one filler note in 100.
+      input: { pluginId: PLUGIN_ID, query: literalQuery('zq100x'), storeIds: STORE_IDS, term: 'zq100x' },
       vaultPath
     });
     Object.assign(results, measured);
