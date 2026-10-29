@@ -1,9 +1,7 @@
 import type { TFile } from 'obsidian';
 
 import { waitForPerformanceVaultScan } from '@mnaoumov/obsidian-dev-toolkit/test-runners/performance-vault-scan';
-import { build } from 'esbuild';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 import { evalInObsidian } from 'obsidian-integration-testing';
 import { getTemporaryVault } from 'obsidian-integration-testing/vitest-global-setup-plugin';
 import {
@@ -16,6 +14,11 @@ import {
 
 import type { BenchmarkApi } from './benchmark-entry.ts';
 import type { BruteScanTerm } from './brute-scan-engine.ts';
+
+import {
+  bundleForRenderer,
+  loadRendererBundle
+} from '../../scripts/helpers/renderer-bundle.ts';
 
 declare global {
   interface Window {
@@ -57,6 +60,7 @@ interface EngineQueryRun {
 }
 
 const FILE_COUNT = 37_000;
+const PLUGIN_ID = 'indexed-search';
 const SCAN_TIMEOUT_IN_MILLISECONDS = 900_000;
 const CORE_RUNS = 3;
 const CANDIDATE_RUNS = 5;
@@ -94,37 +98,22 @@ describe('engine benchmark on the 37,000-note corpus', () => {
       timeoutInMilliseconds: SCAN_TIMEOUT_IN_MILLISECONDS,
       vaultPath
     });
-    const bundleCode = await bundle('benchmark-entry.ts', 'indexedSearchBenchmark');
+    await loadRendererBundle({ entryUrl: new URL('benchmark-entry.ts', import.meta.url), globalName: 'indexedSearchBenchmark', vaultPath });
     await evalInObsidian({
-      async callback({ app, code }) {
-        // A callback cannot import, so the prototypes arrive as a bundle, loaded as a script.
-        const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
-        try {
-          await new Promise<void>((resolve, reject) => {
-            const script = createEl('script');
-            script.src = url;
-            script.addEventListener('load', () => {
-              resolve();
-            });
-            script.addEventListener('error', () => {
-              reject(new Error('The benchmark bundle failed to load'));
-            });
-            document.head.append(script);
-          });
-        } finally {
-          URL.revokeObjectURL(url);
-        }
+      async callback({ app, pluginId }) {
         const api = window.indexedSearchBenchmark?.benchmarkApi;
         if (!api) {
           throw new Error('The benchmark bundle did not define its API');
         }
+        // The plugin's own index would build in the background and skew every number here.
+        await app.plugins.disablePlugin(pluginId);
         api.state.setFiles(
           app.vault.getMarkdownFiles()
             .sort((left, right) => left.path.localeCompare(right.path))
             .map((file: TFile) => ({ mtime: file.stat.mtime, path: file.path, size: file.stat.size }))
         );
       },
-      input: { code: bundleCode },
+      input: { pluginId: PLUGIN_ID },
       vaultPath
     });
   }, SCAN_TIMEOUT_IN_MILLISECONDS);
@@ -241,7 +230,7 @@ describe('engine benchmark on the 37,000-note corpus', () => {
   });
 
   it('builds the brute-scan buffers', async () => {
-    const workerCode = await bundle('brute-scan-worker-entry.ts');
+    const workerCode = await bundleForRenderer(new URL('brute-scan-worker-entry.ts', import.meta.url));
     const buildResult = await evalInObsidian({
       async callback({ app, code, readBatchSize, workerCount }) {
         const api = window.indexedSearchBenchmark?.benchmarkApi;
@@ -345,25 +334,6 @@ describe('engine benchmark on the 37,000-note corpus', () => {
     };
   }
 });
-
-async function bundle(entry: string, globalName?: string): Promise<string> {
-  const result = await build({
-    bundle: true,
-    entryPoints: [fileURLToPath(new URL(entry, import.meta.url))],
-    external: ['node:*'],
-    format: 'iife',
-    logLevel: 'silent',
-    platform: 'browser',
-    target: 'es2022',
-    write: false,
-    ...globalName && { globalName }
-  });
-  const code = result.outputFiles[0]?.text;
-  if (!code) {
-    throw new Error(`Bundling ${entry} produced no output`);
-  }
-  return code;
-}
 
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((left, right) => left - right);

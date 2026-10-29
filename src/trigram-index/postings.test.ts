@@ -5,10 +5,12 @@ import {
 } from 'vitest';
 
 import {
+  decodeCheckedPostings,
   decodePostings,
   encodePostings,
   evaluateQuery,
   intersect,
+  isTypedArray,
   unite
 } from './postings.ts';
 import { literalQuery } from './trigram-query.ts';
@@ -24,6 +26,30 @@ describe('posting codec', () => {
 
   it('spends one byte per small gap', () => {
     expect(encodePostings([5, 6, 7], 5)).toHaveLength(3);
+  });
+});
+
+describe('checked posting decoding', () => {
+  const range = { maxExclusive: 200, min: 100 };
+
+  it('decodes a well-formed list inside its range', () => {
+    expect([...decodeCheckedPostings({ ...range, bytes: encodePostings([100, 101, 199], 100) }) ?? []]).toEqual([100, 101, 199]);
+  });
+
+  it.each([
+    ['a value that is not bytes', [1, 2]],
+    ['a truncated varint', new Uint8Array([0x81])],
+    ['a varint longer than five bytes', new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x80, 0x01])],
+    ['a repeated id', new Uint8Array([1, 0])],
+    ['an id past the range', encodePostings([250], 100)]
+  ])('rejects %s', (_, bytes) => {
+    expect(decodeCheckedPostings({ ...range, bytes })).toBeNull();
+  });
+
+  it('recognizes typed arrays by kind', () => {
+    expect(isTypedArray(new Uint8Array(1), 'Uint8Array')).toBe(true);
+    expect(isTypedArray(new Float64Array(1), 'Uint8Array')).toBe(false);
+    expect(isTypedArray('bytes', 'Float64Array')).toBe(false);
   });
 });
 

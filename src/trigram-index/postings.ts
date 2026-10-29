@@ -13,6 +13,24 @@ const VARINT_CONTINUATION = 0x80;
 const MAX_VARINT_BYTES = 5;
 
 /**
+ * What {@link decodeCheckedPostings} decodes.
+ */
+export interface DecodeCheckedPostingsParams {
+  /**
+   * The encoded deltas, as read back from storage.
+   */
+  readonly bytes: unknown;
+  /**
+   * One past the largest id the list may hold.
+   */
+  readonly maxExclusive: number;
+  /**
+   * The smallest id the list may hold; the first delta is relative to it.
+   */
+  readonly min: number;
+}
+
+/**
  * What {@link decodePostings} decodes.
  */
 export interface DecodePostingsParams {
@@ -32,6 +50,47 @@ export interface DecodePostingsParams {
    * The array to write into, large enough for every id.
    */
   readonly target: Uint32Array;
+}
+
+/**
+ * Decodes a stored posting list, rejecting anything a damaged record could hold instead.
+ *
+ * @param params - The record and the id range it must stay inside.
+ * @returns The ids, ascending, or `null` when the record is not a well-formed list of ids in range.
+ */
+export function decodeCheckedPostings(params: DecodeCheckedPostingsParams): null | Uint32Array {
+  const { bytes, maxExclusive, min } = params;
+  if (!isTypedArray(bytes, 'Uint8Array')) {
+    return null;
+  }
+  const target = new Uint32Array(bytes.length);
+  let previous = min;
+  let count = 0;
+  let position = 0;
+  while (position < bytes.length) {
+    let delta = 0;
+    let multiplier = 1;
+    let byteCount = 0;
+    let byte: number;
+    do {
+      if (position >= bytes.length || byteCount === MAX_VARINT_BYTES) {
+        return null;
+      }
+      byte = bytes[position++] ?? 0;
+      byteCount++;
+      delta += (byte % VARINT_CONTINUATION) * multiplier;
+      multiplier *= VARINT_CONTINUATION;
+    } while (byte >= VARINT_CONTINUATION);
+    if (count > 0 && delta === 0) {
+      return null;
+    }
+    previous += delta;
+    if (previous >= maxExclusive) {
+      return null;
+    }
+    target[count++] = previous;
+  }
+  return target.slice(0, count);
 }
 
 /**
@@ -160,6 +219,22 @@ export function intersect(left: Uint32Array, right: Uint32Array): Uint32Array {
     }
   }
   return result.slice(0, count);
+}
+
+/**
+ * Tells whether a value is a typed array of one kind, from any realm. A value read back from IndexedDB is a
+ * structured clone, which a test's IndexedDB can build from another realm's constructors, so `instanceof` would
+ * call a well-formed record damaged.
+ *
+ * @param value - The value.
+ * @param kind - The typed array's constructor name.
+ * @returns Whether it is one.
+ */
+export function isTypedArray<TKind extends 'Float64Array' | 'Uint8Array'>(
+  value: unknown,
+  kind: TKind
+): value is TKind extends 'Float64Array' ? Float64Array : Uint8Array {
+  return ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === `[object ${kind}]`;
 }
 
 /**

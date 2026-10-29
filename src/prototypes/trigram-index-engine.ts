@@ -12,18 +12,18 @@
 
 /* eslint-disable unicorn/prefer-code-point -- Core's regexes have no `u` flag, so trigrams are UTF-16 code units. */
 
-import type { TrigramQuery } from './trigram-query.ts';
+import type { TrigramQuery } from '../trigram-index/trigram-query.ts';
 
-import { getFoldTable } from './case-folding.ts';
+import { getFoldTable } from '../trigram-index/case-folding.ts';
 import {
   decodePostings,
   encodePostings,
   evaluateQuery
-} from './postings.ts';
+} from '../trigram-index/postings.ts';
 import {
   collectTrigrams,
   packTrigram
-} from './trigram-query.ts';
+} from '../trigram-index/trigram-query.ts';
 
 /**
  * One file the index is built from.

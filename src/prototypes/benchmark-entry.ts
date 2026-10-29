@@ -6,6 +6,10 @@
  */
 
 import {
+  literalQuery,
+  regexQuery
+} from '../trigram-index/trigram-query.ts';
+import {
   fileNameCandidates,
   runCoreSearch
 } from './benchmark-harness.ts';
@@ -17,10 +21,6 @@ import {
   withPeakMemory
 } from './desktop-memory.ts';
 import { TrigramIndexEngine } from './trigram-index-engine.ts';
-import {
-  literalQuery,
-  regexQuery
-} from './trigram-query.ts';
 
 /**
  * Everything a benchmark callback reaches in the renderer.
