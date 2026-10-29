@@ -116,7 +116,9 @@ Every claim above is measured on a generated vault of the target size (37,000 no
 
 `npm run test:integration:desktop:performance` re-measures both engines. It runs `src/prototypes/engine-benchmark.desktop-performance.integration.test.ts` in a real desktop Obsidian (1.14.5) against core Search with nothing patched. The prototypes live beside it in `src/prototypes/` and are loaded into the renderer as a bundled script, so the plugin build does not ship them. `INDEXED_SEARCH_TRIGRAM_SEGMENT_SIZE` overrides the trigram segment size, and `BULK_CORES` sets the brute scan's worker count (2 here).
 
-**The corpus** is the shared generator's 37,000 notes and exactly 110,000,000 UTF-8 bytes, with a 25% Cyrillic share. Its filler prose is rewritten by `scripts/helpers/varied-performance-vault.ts`, because the shared generator repeats ONE sentence per language: 6 distinct sentence heads across the whole vault, which leaves a trigram index a few dozen trigrams. The rewrite uses seeded Zipf-distributed words (20,000 per language) and 2% id-like tokens, and keeps every path and byte count. The result has 90,136 distinct trigrams. Needle terms are planted at known rates: `Quillwort` in 1% of the Latin notes, two spellings of the phrase `silver harbour lantern` in 0.33%, and `журавлина` in 1% of the Cyrillic notes. The vocabulary is synthetic, so a real vault's term distribution can still move these numbers. The shared generator should grow this option, and once it does this rewrite goes.
+**The corpus** is the shared generator's 37,000 notes and exactly 110,000,000 UTF-8 bytes, with a 25% Cyrillic share, generated with `prose: 'varied'` (`@mnaoumov/obsidian-dev-toolkit` 7.2.0 and later; `scripts/vitest-global-setup-performance.ts`). Its 34,000 filler notes draw seeded, Zipf-distributed words from a synthetic 20,000-word vocabulary per language, and filler note `i` holds the planted term `zq<n>x` for every power of ten `n` dividing `i`, as consecutive words of its first sentence. So every query's match count is known exactly: `zq100x`, the phrase `"zq10x zq100x"` and `/zq100?0x/` match 340 notes, and `q1000` matches 34. The planted terms are ASCII, so the other-case query is `ZQ100X`; Cyrillic case folding is covered by the unit tests, not the benchmark. Its vocabulary is built from consonant-vowel syllables, which leaves the corpus 6,959 distinct trigrams, far fewer than a real vault's names, links and numbers give. Every trigram therefore has long posting lists in every segment, which makes the index's candidate times pessimistic.
+
+The engine decision below was measured on an earlier, local rewrite of the same corpus: random letters weighted by frequency, plus 2% id-like tokens, giving 90,136 distinct trigrams, with its own planted needles (`quillwort`, `silver harbour lantern`, `журавлина`). That rewrite was dropped once the shared generator had varied prose. "Re-measured on the shared varied prose" further down has the current numbers.
 
 **What one query costs**, as medians: core Search over every file, against each engine's candidate computation plus core Search restricted to those candidates. Core's timings are from the 8,192-segment run, with the OS file cache warm and the result pane rendering.
 
@@ -154,6 +156,23 @@ What the real index takes from these numbers:
 1. **Use segments of 8,192 files.** Against 2,048, there are three times fewer records, the build is 3.7 times faster, the database is 24% smaller and candidates come back 2 to 5 times sooner.
 2. **The build's peak RSS is over budget, and the JS heap is not the cause.** The heap rose by only 32 MB. The extra RSS follows the size of each segment's single write transaction: +287 MB at 2,048 files, +446 MB at 8,192. Writing each segment in bounded batches of puts, each awaited, is the first thing to measure. A larger segment must not buy speed back with peak memory.
 3. **Delete common trigrams before they are written.** The prototype writes the posting lists and only then deletes the trigrams in 90% or more of the files. With document frequencies known only at the end, the real build needs a cheaper route: keep the counts, and drop or skip lists past the threshold as segments merge.
+
+### Re-measured on the shared varied prose (2026-10-28)
+
+The same benchmark, on the toolkit's `prose: 'varied'` corpus. The trigram segment size is 8,192, the brute scan has 2 workers, and the machine had other bulk work running. The table gives medians, with the candidate time first and the restricted core time second.
+
+| Query (core syntax) | Core matches | Core alone | Trigram | Brute scan |
+| --- | ---: | ---: | ---: | ---: |
+| `zq100x` | 340 | 651 ms | 106 + 29 ms | 86 + 26 ms |
+| `"zq10x zq100x"` | 340 | 820 ms | 106 + 26 ms | 76 + 23 ms |
+| `q1000` (infix) | 34 | 552 ms | 56 + 5 ms | 104 + 4 ms |
+| `/zq100?0x/` | 340 | 599 ms | 47 + 26 ms | 86 + 24 ms |
+| `ZQ100X` (other case) | 340 | 786 ms | 69 + 27 ms | 86 + 23 ms |
+| `/[0-9]{5}/` (no trigram) | 4 | 750 ms | falls back: 751 ms | 125 + 3 ms |
+
+Every candidate set again contained every file core matched. The trigram build took 20.6 s and wrote 34,427 records, about 22 MiB on disk. Its peak was +165 MiB RSS and +27 MiB of JS heap. After GC it held +41 MiB of RSS. Restart took 120 ms to open the index and 233 ms to the first answer. The brute scan built in 4.1 s, peaked at +228 MiB RSS and kept +123 MiB at rest. So the decision stands: the brute scan's resident text is still about twice the 64 MiB steady budget, and the two engines still tie on query speed.
+
+**The real index's peak build RSS sits on its 256 MiB budget on this corpus.** `trigram-index-budget.desktop-performance.integration.test.ts` measured +311 MiB in one run and +254 MiB in the next. Its dense posting lists make each committed batch of 1,024 records larger than the earlier corpus's did.
 
 ### The index as built
 
