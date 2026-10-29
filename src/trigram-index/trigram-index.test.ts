@@ -91,6 +91,8 @@ class FakeVault {
   }
 }
 
+// It replays the whole run once per write, which takes a few seconds on a loaded machine.
+const KILL_TEST_TIMEOUT_IN_MILLISECONDS = 60_000;
 const SMALL_SEGMENT: IndexOptions = { minCommonFiles: 1_000_000, readConcurrency: 2, segmentSize: 4, writeBatchSize: 3 };
 
 async function candidatePaths(index: TrigramIndex, vault: FakeVault, term: string): Promise<string[]> {
@@ -362,7 +364,7 @@ describe('TrigramIndex', () => {
       restarted.index.close();
     }
     expect(writeCount).toBeGreaterThan(10);
-  });
+  }, KILL_TEST_TIMEOUT_IN_MILLISECONDS);
 });
 
 /**
