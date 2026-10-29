@@ -110,6 +110,13 @@ export interface TrigramIndexConstructorParams {
    */
   readonly segmentSize?: number;
   /**
+   * How many file ids, summed over its posting records, one transaction writes at most. Long lists make a
+   * batch of {@link writeBatchSize} records large, so this bounds the bytes a write holds as well.
+   *
+   * @default 262144
+   */
+  readonly writeBatchIds?: number;
+  /**
    * How many posting records are written per transaction. Bounding it bounds the memory a write holds.
    *
    * @default 1024
@@ -143,6 +150,7 @@ const DEFAULT_COMPACT_SHARE = 0.25;
 const DEFAULT_MIN_COMMON_FILES = 1024;
 const DEFAULT_READ_CONCURRENCY = 4;
 const DEFAULT_SEGMENT_SIZE = 8192;
+const DEFAULT_WRITE_BATCH_IDS = 262_144;
 const DEFAULT_WRITE_BATCH_SIZE = 1024;
 const FILE_KEY_PREFIX = 'f:';
 const HALF_DIVISOR = 2;
@@ -171,6 +179,7 @@ export class TrigramIndex {
   private readonly segmentSize: number;
   private readonly segmentTrigrams: (Float64Array | null)[] = [];
   private tail: Promise<unknown> = noopAsync();
+  private readonly writeBatchIds: number;
   private readonly writeBatchSize: number;
 
   /**
@@ -187,6 +196,7 @@ export class TrigramIndex {
     this.postingsStore = params.postingsStore;
     this.readConcurrency = params.readConcurrency ?? DEFAULT_READ_CONCURRENCY;
     this.segmentSize = params.segmentSize ?? DEFAULT_SEGMENT_SIZE;
+    this.writeBatchIds = params.writeBatchIds ?? DEFAULT_WRITE_BATCH_IDS;
     this.writeBatchSize = params.writeBatchSize ?? DEFAULT_WRITE_BATCH_SIZE;
   }
 
@@ -427,17 +437,20 @@ export class TrigramIndex {
       await this.postingsStore.commit({ entries });
     };
     let batch: SegmentPostingRun[] = [];
+    let batchIds = 0;
     for (const run of postings.runs()) {
       if (this.commonTrigrams.has(run.trigram)) {
         continue;
       }
       batch.push(run);
-      if (batch.length !== this.writeBatchSize) {
+      batchIds += run.ids.length;
+      if (batch.length < this.writeBatchSize && batchIds < this.writeBatchIds) {
         continue;
       }
 
       await flush(batch);
       batch = [];
+      batchIds = 0;
     }
     if (batch.length > 0) {
       await flush(batch);
