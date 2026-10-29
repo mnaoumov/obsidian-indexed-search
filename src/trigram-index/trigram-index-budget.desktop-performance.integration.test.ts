@@ -36,6 +36,9 @@ const FILE_COUNT = 37_000;
 const PEAK_BUDGET_IN_BYTES = 256 * BYTES_PER_MEGABYTE;
 const DISK_BUDGET_IN_BYTES = 220 * BYTES_PER_MEGABYTE;
 const PLUGIN_ID = 'indexed-search';
+// Measured at 0.66 s on a loaded machine with the file records packed per segment, against 3.7 to 22 s with one
+// record per path; the bound sits between the two, so a regression to per-path reads fails it.
+const RESTART_BUDGET_IN_MILLISECONDS = 2000;
 const SCAN_TIMEOUT_IN_MILLISECONDS = 900_000;
 const STEADY_BUDGET_IN_BYTES = 64 * BYTES_PER_MEGABYTE;
 const STORE_IDS = ['trigram-files-v1', 'trigram-postings-v1'];
@@ -64,7 +67,7 @@ describe('the trigram index on the 37,000-note corpus', () => {
 
   const results: Record<string, unknown> = {};
 
-  it('builds within the peak, steady and disk budgets, and restarts without rereading', async () => {
+  it('builds within the peak, steady and disk budgets, and restarts quickly without rereading', async () => {
     const measured = await evalInObsidian({
       async callback({ app, pluginId, query, storeIds }) {
         const api = window.indexedSearchBenchmark?.benchmarkApi;
@@ -165,6 +168,7 @@ describe('the trigram index on the 37,000-note corpus', () => {
     expect(measured.missing).toEqual([]);
     expect(measured.candidateCount).toBeLessThan(FILE_COUNT / 10);
     expect(measured.restartReads).toBe(0);
+    expect(measured.restartInMilliseconds).toBeLessThanOrEqual(RESTART_BUDGET_IN_MILLISECONDS);
     expect(measured.after.heapUsed - measured.before.heapUsed).toBeLessThanOrEqual(STEADY_BUDGET_IN_BYTES);
     expect(measured.after.rss - measured.before.rss).toBeLessThanOrEqual(STEADY_BUDGET_IN_BYTES);
     expect(measured.peak.peakHeapUsed - measured.before.heapUsed).toBeLessThanOrEqual(PEAK_BUDGET_IN_BYTES);
