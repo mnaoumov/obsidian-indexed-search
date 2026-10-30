@@ -1,5 +1,6 @@
 import type { Editor } from 'obsidian';
 
+import { OpenBugReportCommandHandler } from '@mnaoumov/obsidian-lib/command-handlers/open-bug-report-command-handler';
 import { OpenDemoVaultCommandHandler } from '@mnaoumov/obsidian-lib/command-handlers/open-demo-vault-command-handler';
 import { PluginSettingsTabComponent } from '@mnaoumov/obsidian-lib/components/plugin-settings-tab-component';
 import { PluginDataHandler } from '@mnaoumov/obsidian-lib/data-handler';
@@ -70,6 +71,11 @@ export class Plugin extends PluginBase {
     // A new window. It is not registered automatically -- a demo vault without this command can only be
     // Reached by downloading the asset by hand. It hides itself on mobile, so no platform guard is needed.
     await this.commandHandlerComponent.registerCommandHandlers(() => [
+      new OpenBugReportCommandHandler({
+        app: this.app,
+        gitHubRepo: 'mnaoumov/obsidian-indexed-search',
+        pluginId: this.manifest.id
+      }),
       new OpenDemoVaultCommandHandler({
         app: this.app,
         pluginId: this.manifest.id,
