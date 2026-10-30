@@ -32,6 +32,22 @@ describe('SegmentPostings', () => {
     expect([...postings.getTrigrams()]).toEqual([...runs.keys()].sort((left, right) => left - right));
   });
 
+  it('starts the next segment empty after a reset', () => {
+    const postings = new SegmentPostings({ segmentBase: 0, segmentSize: 8 });
+    postings.addText('abc', 0);
+    postings.addText('abd', 1);
+    expect(runsByTrigram(postings).get(trigramOf('abc'))).toEqual([0]);
+    postings.reset(8);
+    postings.addText('xbd', 9);
+    postings.addText('abd', 8);
+    const runs = runsByTrigram(postings);
+    expect([...runs.keys()].sort((left, right) => left - right)).toEqual([trigramOf('abd'), trigramOf('xbd')].sort((left, right) => left - right));
+    expect(runs.get(trigramOf('abd'))).toEqual([8]);
+    expect(runs.get(trigramOf('xbd'))).toEqual([9]);
+    expect(postings.getDocumentFrequencies().get(trigramOf('abc'))).toBeUndefined();
+    expect(postings.getDocumentFrequencies().get(trigramOf('abd'))).toBe(1);
+  });
+
   it('refuses an id outside its segment', () => {
     const postings = new SegmentPostings({ segmentBase: 8, segmentSize: 8 });
     expect(() => {

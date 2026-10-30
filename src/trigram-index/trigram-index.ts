@@ -663,6 +663,7 @@ export class TrigramIndex {
     const frequencies = new Map<number, number>();
     let processedCount = 0;
     let start = 0;
+    let postings: null | SegmentPostings = null;
     while (start < files.length) {
       const firstId = this.nextId;
       const segment = Math.floor(firstId / this.segmentSize);
@@ -672,7 +673,12 @@ export class TrigramIndex {
       this.nextId += chunk.length;
       await this.saveMeta();
 
-      const postings = new SegmentPostings({ segmentBase, segmentSize: this.segmentSize });
+      // One collection for every segment, so its buffers are allocated once per build.
+      if (postings) {
+        postings.reset(segmentBase);
+      } else {
+        postings = new SegmentPostings({ segmentBase, segmentSize: this.segmentSize });
+      }
       const indexed = await this.readTexts(chunk, firstId, read, postings);
       processedCount += indexed.length;
       for (const [trigram, frequency] of postings.getDocumentFrequencies()) {
