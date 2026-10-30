@@ -7,6 +7,11 @@
  * pairs groups them by trigram with the file ids ascending inside each group. The pairs live in a `Uint32Array`
  * while every packed pair fits 32 bits, and move to a `Float64Array` only when a segment has so many distinct
  * trigrams that they no longer do.
+ *
+ * One collection serves every segment of a build, through {@link SegmentPostings.reset}: its buffers keep the size
+ * they grew to, so a build allocates them once instead of once per segment. Freed per segment, they waited for a
+ * major garbage collection that a build with little JS heap growth rarely triggers, and the renderer's resident set
+ * climbed by a segment's buffers at every segment.
  */
 
 /* eslint-disable unicorn/prefer-code-point -- Core's regexes have no `u` flag, so trigrams are UTF-16 code units. */
@@ -19,7 +24,8 @@ import { packTrigram } from './trigram-query.ts';
  */
 export interface SegmentPostingRun {
   /**
-   * The file ids, ascending.
+   * The file ids, ascending. A view over the collection's own buffer, valid until its next
+   * {@link SegmentPostings.reset}.
    */
   readonly ids: Uint32Array;
   /**
@@ -58,7 +64,7 @@ export class SegmentPostings {
   private lastSeen = new Int32Array(INITIAL_DENSE_CAPACITY).fill(-1);
   private pairCount = 0;
   private pairs: Float64Array | Uint32Array = new Uint32Array(INITIAL_PAIR_CAPACITY);
-  private readonly segmentBase: number;
+  private segmentBase: number;
   private readonly segmentSize: number;
   private readonly trigramKeys: number[] = [];
 
@@ -119,23 +125,37 @@ export class SegmentPostings {
   }
 
   /**
-   * Sorts the pairs and yields one run per trigram. Call once, after every text is added.
+   * Empties the collection for another segment, keeping its buffers.
+   *
+   * @param segmentBase - The first id of the next segment.
+   */
+  public reset(segmentBase: number): void {
+    this.segmentBase = segmentBase;
+    this.pairCount = 0;
+    this.denseIds.clear();
+    this.trigramKeys.length = 0;
+    this.lastSeen.fill(-1);
+    this.documentFrequencies.fill(0);
+  }
+
+  /**
+   * Sorts the pairs and yields one run per trigram. Call once per segment, after every text is added.
    *
    * @yields Each trigram with its file ids.
    */
   public *runs(): Generator<SegmentPostingRun> {
     const sorted = this.pairs.subarray(0, this.pairCount).sort();
+    // Packed pairs in 32 bits turn into their file ids in place, so a run is a view and the ids cost no copy.
+    const isInPlace = sorted instanceof Uint32Array;
     let runStart = 0;
     while (runStart < this.pairCount) {
       const denseId = Math.floor((sorted[runStart] ?? 0) / this.segmentSize);
       let runEnd = runStart;
       while (runEnd < this.pairCount && Math.floor((sorted[runEnd] ?? 0) / this.segmentSize) === denseId) {
+        sorted[runEnd] = this.segmentBase + ((sorted[runEnd] ?? 0) % this.segmentSize);
         runEnd++;
       }
-      const ids = new Uint32Array(runEnd - runStart);
-      for (let index = runStart; index < runEnd; index++) {
-        ids[index - runStart] = this.segmentBase + ((sorted[index] ?? 0) % this.segmentSize);
-      }
+      const ids = isInPlace ? sorted.subarray(runStart, runEnd) : Uint32Array.from(sorted.subarray(runStart, runEnd));
       yield { ids, trigram: this.trigramKeys[denseId] ?? 0 };
       runStart = runEnd;
     }

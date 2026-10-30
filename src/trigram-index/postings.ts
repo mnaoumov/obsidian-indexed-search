@@ -12,6 +12,10 @@ import type { TrigramQuery } from './trigram-query.ts';
 const VARINT_CONTINUATION = 0x80;
 const MAX_VARINT_BYTES = 5;
 
+// The worst case is five bytes per id, so one shared buffer grown to the longest list spares a build a
+// five-times-oversized scratch array for every list it encodes. Encoding is synchronous, so nothing shares it.
+const encodeScratch = { bytes: new Uint8Array(0) };
+
 /**
  * What {@link decodeCheckedPostings} decodes.
  */
@@ -128,7 +132,10 @@ export function decodePostings(params: DecodePostingsParams): number {
  * @returns The encoded bytes.
  */
 export function encodePostings(ids: readonly number[] | Uint32Array, base: number): Uint8Array {
-  const buffer = new Uint8Array(ids.length * MAX_VARINT_BYTES);
+  if (encodeScratch.bytes.length < ids.length * MAX_VARINT_BYTES) {
+    encodeScratch.bytes = new Uint8Array(ids.length * MAX_VARINT_BYTES);
+  }
+  const buffer = encodeScratch.bytes;
   let position = 0;
   let previous = base;
   for (const id of ids) {
