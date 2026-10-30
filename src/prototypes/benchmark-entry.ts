@@ -18,6 +18,8 @@ import { BruteScanEngine } from './brute-scan-engine.ts';
 import {
   collectGarbage,
   measureMemory,
+  measurePrivateBytes,
+  settleMemory,
   withPeakMemory
 } from './desktop-memory.ts';
 import { TrigramIndexEngine } from './trigram-index-engine.ts';
@@ -31,8 +33,10 @@ export const benchmarkApi = {
   fileNameCandidates,
   literalQuery,
   measureMemory,
+  measurePrivateBytes,
   regexQuery,
   runCoreSearch,
+  settleMemory,
   state: new BenchmarkState(),
   TrigramIndexEngine,
   withPeakMemory
