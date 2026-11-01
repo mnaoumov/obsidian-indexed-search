@@ -21,6 +21,15 @@ import { foldText } from '../trigram-index/case-folding.ts';
 export interface CoreSearchResult {
   readonly elapsedInMilliseconds: number;
   readonly paths: string[];
+  /**
+   * When something first added files to the search's queue after `startSearch` returned: the plugin's hook giving
+   * its held batch back. `null` when nothing did.
+   */
+  readonly releaseInMilliseconds: null | number;
+  /**
+   * How long core's synchronous `startSearch` took: compiling, listing and sorting every file.
+   */
+  readonly syncInMilliseconds: number;
 }
 
 /**
@@ -33,6 +42,14 @@ export interface RunCoreSearchParams {
    */
   readonly candidatePaths: null | ReadonlySet<string>;
   readonly query: string;
+}
+
+/**
+ * When the search's queue was first given files after `startSearch` returned.
+ */
+interface ReleaseMark {
+  // eslint-disable-next-line typescript-dev-toolkit/readonly-interface-members -- the queue's wrapper sets it.
+  time: null | number;
 }
 
 /**
@@ -71,6 +88,8 @@ export async function runCoreSearch(params: RunCoreSearchParams): Promise<CoreSe
   function restoreStart(): void {
     component.start = originalStart;
   }
+  // Set by the queue's wrapper below, which runs later than this function's own flow analysis can see.
+  const release: ReleaseMark = { time: null };
   const stopped = new Promise<void>((resolve) => {
     component.start = (options?: SearchQueueStartOptions): ReturnType<typeof originalStart> => {
       if (candidatePaths) {
@@ -79,22 +98,30 @@ export async function runCoreSearch(params: RunCoreSearchParams): Promise<CoreSe
         vault.getFiles = (): ReturnType<typeof originalGetFiles> => originalGetFiles().filter((file) => candidatePaths.has(file.path));
       }
       try {
-        return originalStart({
+        const queue = originalStart({
           ...options,
           onStop(): void {
             options?.onStop?.();
             resolve();
           }
         });
+        const originalAddList = queue.addList.bind(queue);
+        queue.addList = (items): void => {
+          release.time ??= performance.now();
+          originalAddList(items);
+        };
+        return queue;
       } finally {
         vault.getFiles = originalGetFiles;
       }
     };
   });
   const startTime = performance.now();
+  let syncEndTime: number;
   try {
     view.searchComponent.setValue(query);
     view.startSearch();
+    syncEndTime = performance.now();
     await stopped;
   } finally {
     restoreStart();
@@ -102,7 +129,9 @@ export async function runCoreSearch(params: RunCoreSearchParams): Promise<CoreSe
   const elapsedInMilliseconds = performance.now() - startTime;
   return {
     elapsedInMilliseconds,
-    paths: Array.from(view.dom.resultDomLookup.keys(), (file) => file.path)
+    paths: Array.from(view.dom.resultDomLookup.keys(), (file) => file.path),
+    releaseInMilliseconds: release.time === null ? null : release.time - startTime,
+    syncInMilliseconds: syncEndTime - startTime
   };
 }
 

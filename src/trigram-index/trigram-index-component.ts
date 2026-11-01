@@ -88,12 +88,34 @@ export class TrigramIndexComponent extends LayoutReadyComponent {
   }
 
   /**
+   * Returns the paths of the indexed notes whose content may satisfy a query. Only a note {@link isVouched} for is
+   * ruled out by its absence.
+   *
+   * @param query - The trigram query of a content term.
+   * @returns The paths, or `null` when the query narrows nothing or the index is not ready.
+   */
+  public async getContentCandidates(query: TrigramQuery): Promise<null | Set<string>> {
+    const index = this.index;
+    return !index || !this.isReady ? null : index.candidates(query);
+  }
+
+  /**
    * Returns how many files the index holds records for.
    *
    * @returns The count, or 0 before the index is open.
    */
   public getIndexedFileCount(): number {
     return this.index?.getIndexedFileCount() ?? 0;
+  }
+
+  /**
+   * Tells whether the index vouches for a file: a ready index holding a record of the note with its current stats.
+   *
+   * @param file - The file.
+   * @returns Whether the postings may rule the file out.
+   */
+  public isVouched(file: TFile): boolean {
+    return this.isReady && !!this.index && isMarkdownFile(file) && this.index.isIndexed(toIndexedFileStat(file));
   }
 
   /**

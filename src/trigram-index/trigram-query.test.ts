@@ -6,6 +6,7 @@ import {
 
 import {
   andQuery,
+  canTextSatisfy,
   collectTrigrams,
   formatQuery,
   literalQuery,
@@ -14,6 +15,20 @@ import {
   regexQuery,
   unpackTrigram
 } from './trigram-query.ts';
+
+describe('canTextSatisfy', () => {
+  it('checks a text for the trigrams a query requires, folded', () => {
+    expect(canTextSatisfy(literalQuery('quill'), 'plants/QUILLWORT.md')).toBe(true);
+    expect(canTextSatisfy(literalQuery('quill'), 'plants/quilt.md')).toBe(false);
+  });
+
+  it('evaluates AND, OR, all and none', () => {
+    expect(canTextSatisfy(regexQuery('foo(bar|baz)'), 'a foobaz b')).toBe(true);
+    expect(canTextSatisfy(regexQuery('foo(bar|baz)'), 'a foobax b')).toBe(false);
+    expect(canTextSatisfy({ kind: 'all' }, '')).toBe(true);
+    expect(canTextSatisfy({ kind: 'none' }, 'anything')).toBe(false);
+  });
+});
 
 describe('literalQuery', () => {
   it('requires every folded trigram of the term', () => {

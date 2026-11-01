@@ -18,6 +18,7 @@ import {
 } from './api/indexed-search-api.ts';
 import { PluginSettingsComponent } from './plugin-settings-component.ts';
 import { PluginSettingsTab } from './plugin-settings-tab.ts';
+import { SearchNarrowingComponent } from './search/search-narrowing-component.ts';
 import { TrigramIndexComponent } from './trigram-index/trigram-index-component.ts';
 
 export class Plugin extends PluginBase {
@@ -59,17 +60,25 @@ export class Plugin extends PluginBase {
   }
 
   protected override async onloadImpl(): Promise<void> {
-    this.indexedSearchApi = new IndexedSearchApiImpl({
-      app: this.app,
-      createQuery: this.createSearchQuery.bind(this)
-    });
-
     this.trigramIndexComponentValue = this.addChild(
       new TrigramIndexComponent({
         app: this.app,
         pluginId: this.manifest.id
       })
     );
+
+    const searchNarrowingComponent = this.addChild(
+      new SearchNarrowingComponent({
+        app: this.app,
+        trigramIndexComponent: this.trigramIndexComponentValue
+      })
+    );
+
+    this.indexedSearchApi = new IndexedSearchApiImpl({
+      app: this.app,
+      createQuery: this.createSearchQuery.bind(this),
+      selectFiles: searchNarrowingComponent.selectCandidateFiles.bind(searchNarrowingComponent)
+    });
 
     const pluginSettingsComponent = this.addChild(
       new PluginSettingsComponent({

@@ -6,7 +6,8 @@
  * `search` runs core Search's own scan, as `SearchView.startSearch` runs it in Obsidian 1.14.5, without the view:
  * every file of the vault that core does not ignore and supports, read only when the compiled query needs the
  * text, and checked by the compiled query's own `match`. So its results are core's by construction; the plugin
- * owns only the loop around core's matcher.
+ * owns only the loop around core's matcher, and the list of files it runs over, which the trigram index narrows
+ * to a superset of core's matches.
  */
 
 import type {
@@ -42,7 +43,21 @@ export interface IndexedSearchApiImplConstructorParams {
    * Compiles a raw query with core Search's own query class.
    */
   readonly createQuery: SearchQueryFactory;
+
+  /**
+   * Narrows the files the scan checks to those a compiled query may match, keeping every file it cannot rule out.
+   */
+  readonly selectFiles: SearchFileSelector;
 }
+
+/**
+ * Returns the files a compiled query may match, a superset of core's matches, in the order given.
+ *
+ * @param searchQuery - The compiled query.
+ * @param files - Every file of the vault.
+ * @returns The files to check.
+ */
+export type SearchFileSelector = (searchQuery: ObsidianSearchQuery, files: readonly TFile[]) => Promise<TFile[]>;
 
 /**
  * Compiles a raw query the way core Search does.
@@ -66,6 +81,7 @@ const MAX_BUSY_IN_MILLISECONDS = 100;
 export class IndexedSearchApiImpl implements IndexedSearchApi {
   private readonly app: App;
   private readonly createQuery: SearchQueryFactory;
+  private readonly selectFiles: SearchFileSelector;
 
   /**
    * Creates the API.
@@ -75,6 +91,7 @@ export class IndexedSearchApiImpl implements IndexedSearchApi {
   public constructor(params: IndexedSearchApiImplConstructorParams) {
     this.app = params.app;
     this.createQuery = params.createQuery;
+    this.selectFiles = params.selectFiles;
   }
 
   /**
@@ -97,7 +114,9 @@ export class IndexedSearchApiImpl implements IndexedSearchApi {
     const hits: IndexedSearchHit[] = [];
     let busySince = performance.now();
 
-    for (const file of this.app.vault.getFiles()) {
+    const files = await this.selectFiles(searchQuery, this.app.vault.getFiles());
+    abortSignal?.throwIfAborted();
+    for (const file of files) {
       if (performance.now() - busySince > MAX_BUSY_IN_MILLISECONDS) {
         await sleep(0);
         busySince = performance.now();
