@@ -60,11 +60,6 @@ export class Plugin extends PluginBase {
   }
 
   protected override async onloadImpl(): Promise<void> {
-    this.indexedSearchApi = new IndexedSearchApiImpl({
-      app: this.app,
-      createQuery: this.createSearchQuery.bind(this)
-    });
-
     this.trigramIndexComponentValue = this.addChild(
       new TrigramIndexComponent({
         app: this.app,
@@ -72,12 +67,18 @@ export class Plugin extends PluginBase {
       })
     );
 
-    this.addChild(
+    const searchNarrowingComponent = this.addChild(
       new SearchNarrowingComponent({
         app: this.app,
         trigramIndexComponent: this.trigramIndexComponentValue
       })
     );
+
+    this.indexedSearchApi = new IndexedSearchApiImpl({
+      app: this.app,
+      createQuery: this.createSearchQuery.bind(this),
+      selectFiles: searchNarrowingComponent.selectCandidateFiles.bind(searchNarrowingComponent)
+    });
 
     const pluginSettingsComponent = this.addChild(
       new PluginSettingsComponent({

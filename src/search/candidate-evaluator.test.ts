@@ -14,7 +14,10 @@ import {
   formatQuery,
   literalQuery
 } from '../trigram-index/trigram-query.ts';
-import { evaluateCandidates } from './candidate-evaluator.ts';
+import {
+  evaluateCandidates,
+  prefetchContentCandidates
+} from './candidate-evaluator.ts';
 
 interface FakeNote {
   readonly content: string;
@@ -97,5 +100,45 @@ describe('evaluateCandidates', () => {
 
   it('rejects an unknown expression', async () => {
     await expect(evaluate(castTo<CandidateExpression>({ kind: 'unknown' }))).rejects.toThrow('Unexpected candidate expression');
+  });
+});
+
+describe('prefetchContentCandidates', () => {
+  it('starts every content read at once, reads each query once, and gives the same answers', async () => {
+    const lookups: string[] = [];
+    const quillwort = term('quillwort', 'content');
+    const expression: CandidateExpression = {
+      children: [quillwort, { children: [term('lantern'), quillwort, term('silver', 'path')], kind: 'or' }],
+      kind: 'and'
+    };
+    const source = prefetchContentCandidates(expression, createSource(lookups));
+    expect(lookups).toEqual([formatQuery(literalQuery('quillwort')), formatQuery(literalQuery('lantern'))]);
+    expect(await evaluate(expression, source)).toEqual(await evaluate(expression));
+    expect(lookups).toHaveLength(2);
+  });
+
+  it('reads a query outside the expression through the original source', async () => {
+    const lookups: string[] = [];
+    const source = prefetchContentCandidates({ kind: 'tag', regex: /^#plant/i }, createSource(lookups));
+    expect(lookups).toEqual([]);
+    expect(await evaluate(term('silver', 'content'), source)).toEqual(['lights/two.md']);
+    expect(lookups).toHaveLength(1);
+  });
+
+  it('does not leave a rejected read unhandled when nothing awaits it', async () => {
+    const failing: CandidateSource<FakeNote> = {
+      ...createSource(),
+      getContentCandidates: async () => {
+        await noopAsync();
+        throw new Error('read failed');
+      }
+    };
+    const source = prefetchContentCandidates(term('quillwort', 'content'), failing);
+    await noopAsync();
+    await expect(source.getContentCandidates(literalQuery('quillwort'))).rejects.toThrow('read failed');
+  });
+
+  it('rejects an unknown expression', () => {
+    expect(() => prefetchContentCandidates(castTo<CandidateExpression>({ kind: 'unknown' }), createSource())).toThrow('Unexpected candidate expression');
   });
 });

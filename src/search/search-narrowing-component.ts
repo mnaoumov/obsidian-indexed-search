@@ -3,11 +3,12 @@
  *
  * Narrows core Search's scan to the files its query can match.
  *
- * Core's `startSearch` compiles the query, then its queue component lists every file into a new result queue,
- * which core starts consuming. The patch catches that queue as the component returns it and takes its first batch
- * out before anything is read, so the consumer waits on an empty queue without starting its loader. Once the index
- * has answered, the batch goes back, minus the notes the index rules out. Core's own matcher still checks every
- * file left, and every file a vault or cache event queues meanwhile, so the results are core's own.
+ * Core's `startSearch` compiles the query, then its queue component lists and sorts every file into a new result
+ * queue, which core starts consuming. The patch starts the index reads as soon as the query is compiled, and hands
+ * the queue component an empty list, so core sorts nothing and its consumer waits on an empty queue without
+ * starting its loader. Once the index has answered, the files go back, minus the notes the index rules out, sorted
+ * with the comparator core asked the empty list for. Core's own matcher still checks every file left, and every file
+ * a vault or cache event queues meanwhile, so the results are core's own.
  *
  * Holding the batch matters: the index's reads, run beside core's scan, came back 5 to 30 times slower and only
  * after core had read up to 40% of the vault (2026-10-29, the 37,000-note corpus).
@@ -36,9 +37,13 @@ import {
 import { getAllTags } from 'obsidian';
 
 import type { TrigramIndexComponent } from '../trigram-index/trigram-index-component.ts';
+import type { CandidateSource } from './candidate-evaluator.ts';
 import type { CandidateExpression } from './candidate-expression.ts';
 
-import { evaluateCandidates } from './candidate-evaluator.ts';
+import {
+  evaluateCandidates,
+  prefetchContentCandidates
+} from './candidate-evaluator.ts';
 import { translateMatcher } from './candidate-expression.ts';
 
 /**
@@ -61,13 +66,31 @@ export interface SearchNarrowingComponentConstructorParams {
 }
 
 /**
- * A search's first batch, taken out of its queue until the index answers.
+ * Orders two files the way core's queue component sorts its first batch.
+ */
+type FileComparator = (left: TFile, right: TFile) => number;
+
+/**
+ * The empty file list core's queue component is handed in place of every file, recording the sort it asks for.
+ */
+interface FileSeed {
+  // eslint-disable-next-line typescript-dev-toolkit/readonly-interface-members -- the seed's `sort` records it.
+  compare: FileComparator | null;
+  readonly files: TFile[];
+}
+
+/**
+ * A search's first batch, kept out of its queue until the index answers.
  */
 interface HeldBatch {
-  readonly expression: CandidateExpression;
+  /**
+   * Core's own sort for the batch, recorded from the seed it sorted; `null` when {@link files} is already in core's
+   * order, or core does not sort.
+   */
+  readonly compare: FileComparator | null;
   readonly files: readonly TFile[];
+  readonly prepared: PreparedSearch;
   readonly queue: ItemQueue<TFile>;
-  readonly searchQuery: ObsidianSearchQuery;
   readonly universe: readonly TFile[];
 }
 
@@ -77,6 +100,16 @@ interface HeldBatch {
 interface HeldBatchSlot {
   // eslint-disable-next-line typescript-dev-toolkit/readonly-interface-members -- the wrapper fills it during the call.
   batch: HeldBatch | null;
+}
+
+/**
+ * A search whose index reads started before core listed its files.
+ */
+interface PreparedSearch {
+  readonly expression: CandidateExpression;
+  readonly searchQuery: ObsidianSearchQuery;
+  readonly source: CandidateSource<TFile>;
+  readonly startTime: number;
 }
 
 /**
@@ -99,29 +132,34 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
   }
 
   /**
-   * Takes the first batch out of a search's fresh queue when the index can narrow its query.
+   * Translates a compiled query and starts its index reads, when the index can narrow it.
+   *
+   * Core's `startSearch` compiles the query before it starts its queue, so reads started here are under way while the
+   * queue is set up and core's own work in `startSearch` finishes.
    *
    * @param searchQuery - The query the search compiled.
-   * @param queue - The queue the search is about to consume, holding its first batch.
-   * @returns The held batch, or `null` when the queue is left alone.
+   * @returns The prepared search, or `null` when the index cannot narrow the query.
    */
-  public hold(searchQuery: ObsidianSearchQuery, queue: ItemQueue<TFile>): HeldBatch | null {
+  public prepare(searchQuery: ObsidianSearchQuery): null | PreparedSearch {
     if (!searchQuery.matcher) {
       return null;
     }
+    const startTime = performance.now();
     this.guards ??= getSearchMatcherGuards(this.app);
     const expression = translateMatcher(searchQuery.matcher, this.guards);
     if (expression.kind === 'all') {
       this.log(`Query "${searchQuery.query}" needs no trigram the index can check; core scans every file`);
       return null;
     }
-    const files = queue.items.queue.slice(queue.items.offset);
-    const universe = files.filter((file) => this.trigramIndexComponent.isVouched(file));
-    if (universe.length === 0) {
-      return null;
-    }
-    queue.clear();
-    return { expression, files, queue, searchQuery, universe };
+    const source = prefetchContentCandidates<TFile>(expression, {
+      getContentCandidates: async (query) => this.trigramIndexComponent.getContentCandidates(query),
+      getPath: (file) => file.path,
+      getTags: (file) => {
+        const cache = this.app.metadataCache.getFileCache(file);
+        return cache ? getAllTags(cache) ?? [] : null;
+      }
+    });
+    return { expression, searchQuery, source, startTime };
   }
 
   /**
@@ -133,13 +171,56 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
    * @returns A promise that settles once the batch is back.
    */
   public async release(view: SearchView, batch: HeldBatch): Promise<void> {
-    const startTime = performance.now();
     let excluded: null | Set<TFile> = null;
     try {
-      excluded = await withTimeout(this.findExcluded(batch), HOLD_TIMEOUT_IN_MILLISECONDS);
+      excluded = await withTimeout(this.findExcluded(batch.prepared, batch.universe), HOLD_TIMEOUT_IN_MILLISECONDS);
     } finally {
-      this.giveBack(view, batch, excluded, performance.now() - startTime);
+      this.giveBack(view, batch, excluded, performance.now() - batch.prepared.startTime);
     }
+  }
+
+  /**
+   * Returns the files a compiled query may match: every given file but the notes the index rules out. A note whose
+   * stats change while the index answers stays in, since the index answered for its earlier content.
+   *
+   * @param searchQuery - The compiled query.
+   * @param files - The files to choose from.
+   * @returns The candidates, in the order given.
+   */
+  public async selectCandidateFiles(searchQuery: ObsidianSearchQuery, files: readonly TFile[]): Promise<TFile[]> {
+    const prepared = this.prepare(searchQuery);
+    const universe = prepared ? files.filter((file) => this.trigramIndexComponent.isVouched(file)) : [];
+    const excluded = prepared && universe.length > 0 ? await this.findExcluded(prepared, universe) : null;
+    return excluded ? files.filter((file) => !excluded.has(file) || !this.trigramIndexComponent.isVouched(file)) : [...files];
+  }
+
+  /**
+   * Starts a search's queue with its first batch held back, when the index vouches for any of its notes.
+   *
+   * Listing and sorting every file is the whole of core's synchronous `startSearch`: 56 to 70 ms on 37,000 files,
+   * and 0 ms with no file (2026-11-01). So core's queue component is handed an empty list, which records the sort
+   * core asks for, and only the files kept are sorted, on release. Should core ever fill the queue some other way,
+   * that batch is taken back out of the queue instead, already in core's order.
+   *
+   * @param prepared - The search, with its index reads under way.
+   * @param start - Core's own `start`, which creates the queue.
+   * @returns The queue core consumes, and the held batch, or `null` when the queue got every file.
+   */
+  public startHeld(prepared: PreparedSearch, start: () => ItemQueue<TFile>): [ItemQueue<TFile>, HeldBatch | null] {
+    const vault = this.app.vault;
+    const files = vault.getFiles();
+    const universe = files.filter((file) => this.trigramIndexComponent.isVouched(file));
+    if (universe.length === 0) {
+      return [start(), null];
+    }
+    const seed = createFileSeed();
+    const queue = withTemporaryProperty(vault, 'getFiles', () => seed.files, start);
+    const seeded = queue.items.queue.slice(queue.items.offset);
+    if (seeded.length > 0) {
+      queue.clear();
+      return [queue, { compare: null, files: seeded, prepared, queue, universe }];
+    }
+    return [queue, { compare: seed.compare, files, prepared, queue, universe }];
   }
 
   /**
@@ -150,30 +231,26 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
     this.patchSearchView();
   }
 
-  private async findExcluded(batch: HeldBatch): Promise<null | Set<TFile>> {
-    const candidates = await evaluateCandidates(batch.expression, batch.universe, {
-      getContentCandidates: async (query) => this.trigramIndexComponent.getContentCandidates(query),
-      getPath: (file) => file.path,
-      getTags: (file) => {
-        const cache = this.app.metadataCache.getFileCache(file);
-        return cache ? getAllTags(cache) ?? [] : null;
-      }
-    });
-    return candidates ? new Set(batch.universe.filter((file) => !candidates.has(file))) : null;
+  private async findExcluded(prepared: PreparedSearch, universe: readonly TFile[]): Promise<null | Set<TFile>> {
+    const candidates = await evaluateCandidates(prepared.expression, universe, prepared.source);
+    return candidates ? new Set(universe.filter((file) => !candidates.has(file))) : null;
   }
 
   private giveBack(view: SearchView, batch: HeldBatch, excluded: null | Set<TFile>, elapsedInMilliseconds: number): void {
-    if (view.queue.queue !== batch.queue || view.searchQuery !== batch.searchQuery || batch.queue.runnable.isCancelled()) {
+    if (view.queue.queue !== batch.queue || view.searchQuery !== batch.prepared.searchQuery || batch.queue.runnable.isCancelled()) {
       return;
     }
     // A note edited, renamed or created during the hold is queued again by core's own events, so only a deleted
     // note needs checking here.
     const kept = batch.files.filter((file) => !excluded?.has(file) && this.app.vault.getAbstractFileByPath(file.path) === file);
+    if (batch.compare) {
+      kept.sort(batch.compare);
+    }
     const elapsed = elapsedInMilliseconds.toFixed(0);
     if (excluded) {
-      this.log(`Query "${batch.searchQuery.query}": ${String(kept.length)} of ${String(batch.files.length)} files queued after ${elapsed} ms`);
+      this.log(`Query "${batch.prepared.searchQuery.query}": ${String(kept.length)} of ${String(batch.files.length)} files queued after ${elapsed} ms`);
     } else {
-      this.log(`Query "${batch.searchQuery.query}" got no narrowing from the index in ${elapsed} ms; core scans every file`);
+      this.log(`Query "${batch.prepared.searchQuery.query}" got no narrowing from the index in ${elapsed} ms; core scans every file`);
     }
     batch.queue.addList(kept);
   }
@@ -194,33 +271,56 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
       patchHandler: ({ fallback, originalThis }) => {
         const held: HeldBatchSlot = { batch: null };
         const component = originalThis.queue;
-        const ownStart = Object.getOwnPropertyDescriptor(component, 'start');
         const previousStart = component.start.bind(component);
         // The queue component lists the files synchronously inside `start`, and core starts consuming them right
-        // after it returns, so the batch is taken out in between. The wrapper lives only for this one call.
-        component.start = (options): ItemQueue<TFile> => {
-          const queue = previousStart(options);
+        // after it returns, so the batch is held back there. The wrapper lives only for this one call.
+        withTemporaryProperty(component, 'start', (options): ItemQueue<TFile> => {
+          // Core stores the compiled query before it starts the queue, so the index reads can begin first.
           const searchQuery = originalThis.searchQuery;
-          if (!this.isUnloaded() && searchQuery) {
-            held.batch = this.hold(searchQuery, queue);
+          const prepared = !this.isUnloaded() && searchQuery ? this.prepare(searchQuery) : null;
+          if (!prepared) {
+            return previousStart(options);
           }
+          const [queue, batch] = this.startHeld(prepared, () => previousStart(options));
+          held.batch = batch;
           return queue;
-        };
-        try {
-          fallback();
-        } finally {
-          if (ownStart) {
-            Object.defineProperty(component, 'start', ownStart);
-          } else {
-            delete (component as Partial<typeof component>).start;
-          }
-        }
+        }, fallback);
         const heldBatch = held.batch;
         if (heldBatch) {
           invokeAsyncSafely(async () => this.release(originalThis, heldBatch));
         }
       }
     });
+  }
+}
+
+function createFileSeed(): FileSeed {
+  const seed: FileSeed = { compare: null, files: [] };
+  Object.defineProperty(seed.files, 'sort', {
+    value: (compare?: FileComparator): TFile[] => {
+      seed.compare = compare ?? null;
+      return seed.files;
+    }
+  });
+  return seed;
+}
+
+function withTemporaryProperty<Target extends object, Key extends keyof Target, Result>(
+  target: Target,
+  key: Key,
+  value: Target[Key],
+  callback: () => Result
+): Result {
+  const own = Object.getOwnPropertyDescriptor(target, key);
+  target[key] = value;
+  try {
+    return callback();
+  } finally {
+    if (own) {
+      Object.defineProperty(target, key, own);
+    } else {
+      Reflect.deleteProperty(target, key);
+    }
   }
 }
 

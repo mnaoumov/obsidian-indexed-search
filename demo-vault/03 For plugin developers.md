@@ -2,7 +2,7 @@
 
 Core Search has no API: a plugin or a script that wants Search's answer has had to scrape the result pane. `Indexed Search` publishes one, through the `@mnaoumov/obsidian-lib` plugin registry: `search(query)` takes a query written exactly as you would type it into the Search pane and answers the files the pane would list.
 
-It does not reimplement Search. The query is compiled by core Search's own parser and every file is checked by core Search's own matcher, so `file:`, `path:`, `tag:`, `line:`, `section:`, `[property:value]`, regular expressions, `match-case:` and every other operator mean exactly what they mean in the pane. The plugin's test suite runs a corpus of such queries through both and fails on any difference.
+It does not reimplement Search. The query is compiled by core Search's own parser, and every file the trigram index cannot rule out is checked by core Search's own matcher, so `file:`, `path:`, `tag:`, `line:`, `section:`, `[property:value]`, regular expressions, `match-case:` and every other operator mean exactly what they mean in the pane. The plugin's test suite runs a corpus of such queries through both and fails on any difference.
 
 Everything a consumer needs is declared in the plugin's repo-root `api.d.ts`, which imports nothing but `obsidian`, with its contract in `api-contract.ts`. Copy them, or copy the few lines you use. The buttons below run exactly the calls a consumer makes, with a copy of those declarations in this vault's `demoSetup.ts`.
 

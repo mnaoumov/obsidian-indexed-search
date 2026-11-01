@@ -4,6 +4,7 @@ import type {
 } from '@obsidian-typings/obsidian-public-latest';
 import type { TFile } from 'obsidian';
 
+import { noopAsync } from '@mnaoumov/typescript-lib/function';
 import { castTo } from '@mnaoumov/typescript-lib/object-utils';
 import { App } from 'obsidian-test-mocks/obsidian';
 import {
@@ -14,7 +15,10 @@ import {
   vi
 } from 'vitest';
 
-import type { SearchQueryFactory } from './indexed-search-api-impl.ts';
+import type {
+  SearchFileSelector,
+  SearchQueryFactory
+} from './indexed-search-api-impl.ts';
 
 import { IndexedSearchApiImpl } from './indexed-search-api-impl.ts';
 
@@ -43,8 +47,11 @@ describe('IndexedSearchApiImpl', () => {
     Object.assign(app.metadataCache, { isUserIgnored: (path: string): boolean => ignoredPaths.has(path) });
   });
 
-  function createApi(createQuery: SearchQueryFactory): IndexedSearchApiImpl {
-    return new IndexedSearchApiImpl({ app: castTo(app), createQuery });
+  function createApi(createQuery: SearchQueryFactory, selectFiles: SearchFileSelector = async (_searchQuery, files) => {
+    await noopAsync();
+    return [...files];
+  }): IndexedSearchApiImpl {
+    return new IndexedSearchApiImpl({ app: castTo(app), createQuery, selectFiles });
   }
 
   function contentMatcher(term: string): (file: TFile, content: string) => null | SearchMatchResult {
@@ -65,6 +72,21 @@ describe('IndexedSearchApiImpl', () => {
       ['a.md', { content: [[4, 9]] }],
       ['b.md', { content: [[0, 5]] }]
     ]);
+  });
+
+  it('should check only the files the selector keeps, handing it the compiled query', async () => {
+    app.vault.createSync__('a.md', 'alpha');
+    app.vault.createSync__('b.md', 'alpha too');
+    const searchQuery = fakeQuery({ match: contentMatcher('alpha') });
+    const selectFiles = vi.fn<SearchFileSelector>(async (_searchQuery, files) => {
+      await noopAsync();
+      return files.filter((file) => file.path !== 'b.md');
+    });
+
+    const hits = await createApi(() => searchQuery, selectFiles).search('alpha');
+
+    expect(hits.map((hit) => hit.file.path)).toEqual(['a.md']);
+    expect(selectFiles.mock.calls[0]?.[0]).toBe(searchQuery);
   });
 
   it('should pass the query and the case setting to core\'s query class', async () => {

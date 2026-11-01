@@ -31,13 +31,16 @@ interface IndexPlugin {
 interface SearchMeasurement {
   readonly medianInMilliseconds: number;
   readonly paths: string[];
+  readonly releaseMedianInMilliseconds: null | number;
+  readonly syncMedianInMilliseconds: number;
 }
 
 const FILE_COUNT = 37_000;
 const MIN_SPEEDUP = 3;
 const PLUGIN_ID = 'indexed-search';
-const QUERIES = ['quillwort', '"silver harbour lantern"', 'llwor', '/silver harbou?r lantern/', 'ЖУРАВЛИНА'];
-const RUN_COUNT = 3;
+// The generator plants `zq<n>x` for every power of ten `n` dividing a filler note's number, so each query's match count is known.
+const QUERIES = ['zq100x', '"zq10x zq100x"', 'q1000', '/zq100?0x/', 'ZQ100X'];
+const RUN_COUNT = 5;
 const SCAN_TIMEOUT_IN_MILLISECONDS = 900_000;
 const QUERY_TIMEOUT_IN_MILLISECONDS = 300_000;
 
@@ -86,16 +89,30 @@ describe('core Search with the plugin on the 37,000-note corpus', () => {
           throw new Error('The benchmark bundle is not loaded');
         }
         const { runCoreSearch } = api;
+        function median(values: number[]): number {
+          values.sort((left, right) => left - right);
+          return values[Math.floor(values.length / 2)] ?? Infinity;
+        }
         async function measure(): Promise<SearchMeasurement> {
           const times: number[] = [];
+          const releases: number[] = [];
+          const syncs: number[] = [];
           let paths: string[] = [];
           for (let run = 0; run < runCount; run++) {
             const result = await runCoreSearch({ app, candidatePaths: null, query: searchQuery });
             times.push(result.elapsedInMilliseconds);
+            syncs.push(result.syncInMilliseconds);
+            if (result.releaseInMilliseconds !== null) {
+              releases.push(result.releaseInMilliseconds);
+            }
             paths = result.paths.sort();
           }
-          times.sort((left, right) => left - right);
-          return { medianInMilliseconds: times[Math.floor(times.length / 2)] ?? Infinity, paths };
+          return {
+            medianInMilliseconds: median(times),
+            paths,
+            releaseMedianInMilliseconds: releases.length === 0 ? null : median(releases),
+            syncMedianInMilliseconds: median(syncs)
+          };
         }
 
         await app.plugins.disablePlugin(pluginId);
@@ -110,6 +127,8 @@ describe('core Search with the plugin on the 37,000-note corpus', () => {
         return {
           narrowedInMilliseconds: narrowed.medianInMilliseconds,
           narrowedPaths: narrowed.paths,
+          narrowedReleaseInMilliseconds: narrowed.releaseMedianInMilliseconds,
+          narrowedSyncInMilliseconds: narrowed.syncMedianInMilliseconds,
           plainInMilliseconds: plain.medianInMilliseconds,
           plainPaths: plain.paths
         };
@@ -120,6 +139,8 @@ describe('core Search with the plugin on the 37,000-note corpus', () => {
     results[query] = {
       matchCount: measured.plainPaths.length,
       narrowedInMilliseconds: Math.round(measured.narrowedInMilliseconds),
+      narrowedReleaseInMilliseconds: measured.narrowedReleaseInMilliseconds === null ? null : Math.round(measured.narrowedReleaseInMilliseconds),
+      narrowedSyncInMilliseconds: Math.round(measured.narrowedSyncInMilliseconds),
       plainInMilliseconds: Math.round(measured.plainInMilliseconds)
     };
 
