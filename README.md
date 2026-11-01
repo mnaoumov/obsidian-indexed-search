@@ -23,6 +23,10 @@ A copy of the vault ships with every release. You can access it via any of the f
 
 No similar plugin was found when this was last searched for, on YYYY-MM-DD.
 
+## For plugin developers
+
+`Indexed Search` publishes a typed API (contract `1.0.0`) whose `search(query)` answers a query written in core Search's own syntax with exactly the files core Search lists, because core's own parser and matcher decide. It is declared in [`api.d.ts`](./api.d.ts) with its contract in [`api-contract.ts`](./api-contract.ts). How to reach it, its options and what a hit carries are in [03 For plugin developers](<./demo-vault/03 For plugin developers.md>).
+
 ## Installation
 
 The plugin is not available in [the official Community Plugins repository](https://community.obsidian.md) yet.

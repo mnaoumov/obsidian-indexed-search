@@ -4,6 +4,7 @@ import type {
 } from 'obsidian';
 
 import { configureCommunityPlugin } from '@mnaoumov/obsidian-lib/community-plugins';
+import { findPluginApi } from '@mnaoumov/obsidian-lib/plugin/plugin-api';
 import {
   MarkdownView,
   Notice
@@ -18,6 +19,11 @@ const PLUGIN_ID = 'indexed-search';
 const SCRATCH_NOTE_PATH = 'Materials/01 Sample commands/Scratch note.md';
 
 const DEFAULT_TEXT_SETTING = 'defaultText';
+
+// A copy of the part of the plugin's `api.d.ts` these buttons use, as a consumer would copy it.
+interface IndexedSearchApi {
+  search(query: string, options?: { readonly isCaseSensitive?: boolean }): Promise<{ readonly file: TFile }[]>;
+}
 
 /**
  * Runs the plugin's `Sample` command, which shows a notice.
@@ -84,4 +90,22 @@ async function ensureScratchNote(app: App): Promise<TFile> {
     return existing;
   }
   return await app.vault.create(SCRATCH_NOTE_PATH, '# Scratch note\n\nRun the Sample editor command here.\n');
+}
+
+/**
+ * Runs a core Search query through the plugin's API and lists the matching files in a notice.
+ *
+ * Manual equivalent: type the same query into the Search pane.
+ */
+export async function showSearchHits(app: App, query: string, options?: { readonly isCaseSensitive?: boolean }): Promise<void> {
+  const indexedSearchApi = findPluginApi<IndexedSearchApi>({
+    apiVersionRange: '^1.0.0',
+    pluginId: PLUGIN_ID
+  });
+  if (!indexedSearchApi) {
+    new Notice('The Indexed Search API is not available. Is the plugin enabled?');
+    return;
+  }
+  const hits = await indexedSearchApi.search(query, options);
+  new Notice(hits.length === 0 ? `No file matches ${query}` : `${query} matches:\n${hits.map((hit) => hit.file.basename).join('\n')}`);
 }
