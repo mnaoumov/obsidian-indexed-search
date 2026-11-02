@@ -6,35 +6,40 @@ Find them in Obsidian under **Settings → Community plugins → `Indexed Search
 
 ## General
 
-- `textSetting`
-  - free text, shown in the settings tab as **Text setting name**. The scaffolded sample setting; nothing reads it yet.
+- `shouldNarrowSearch`
+  - on or off, shown in the settings tab as **Narrow core Search**; on by default. On, core Search and the [search API](<./03 For plugin developers.md>) read only the notes the index cannot rule out. Off, they read every note, exactly as without the plugin, so you can compare the speed of core Search alone, or rule the plugin out when a result surprises you. The index stays current either way, so turning it back on is instant.
 
 ## Try it
 
-Change the setting without leaving this note. The change applies live — the plugin's settings component picks it up, so there is no reload.
+Turn narrowing off without leaving this note. The change applies to the next search, with no reload.
 
 ```code-button
 ---
-caption: Set textSetting to "changed by the demo"
+caption: Turn shouldNarrowSearch off
 ---
-await require('/demoSetup.ts').setTextSetting(app, 'changed by the demo');
+await require('/demoSetup.ts').setShouldNarrowSearch(app, false);
 ```
 
-Manual equivalent: type the same value into **Text setting name** in the settings tab.
+Manual equivalent: turn off **Narrow core Search** in the settings tab.
 
-Open the settings tab now and the field shows the new value. When you are done, put it back:
+Search now, and core Search reads every note:
 
 ```code-button
 ---
-caption: Reset textSetting to its default
+caption: Search for "lantern" with narrowing off
 ---
-await require('/demoSetup.ts').resetTextSetting(app);
+require('/demoSetup.ts').searchInPane(app, 'path:"Materials/01 Core Search" lantern');
 ```
 
-Manual equivalent: type `defaultText` back into the field.
+Manual equivalent: type the same query into the Search pane (`Ctrl+Shift+F` / `Cmd+Shift+F`).
 
-## Adding your own
+The results are the same as with narrowing on. When you are done, turn it back on:
 
-Settings are declared as plain properties on the `PluginSettings` class in `src/plugin-settings.ts`; the property's initial value **is** its default. `src/plugin-settings-tab.ts` renders one row per setting, and `src/plugin-settings-component.ts` is where migrations and validators go.
+```code-button
+---
+caption: Turn shouldNarrowSearch back on
+---
+await require('/demoSetup.ts').setShouldNarrowSearch(app, true);
+```
 
-When you add one, add it to this note too. The demo-vault coverage suite can be told to fail the build when a setting is documented nowhere — see the commented reflection spec in `src/demo-vault.no-app.integration.test.ts`.
+Manual equivalent: turn **Narrow core Search** back on.

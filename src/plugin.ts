@@ -1,6 +1,5 @@
 import type { PluginApiDeclaration } from '@mnaoumov/obsidian-lib/plugin/plugin-api';
 import type { ObsidianSearchQuery } from '@obsidian-typings/obsidian-public-latest';
-import type { Editor } from 'obsidian';
 
 import { OpenBugReportCommandHandler } from '@mnaoumov/obsidian-lib/command-handlers/open-bug-report-command-handler';
 import { OpenDemoVaultCommandHandler } from '@mnaoumov/obsidian-lib/command-handlers/open-demo-vault-command-handler';
@@ -9,7 +8,6 @@ import { PluginDataHandler } from '@mnaoumov/obsidian-lib/data-handler';
 import { PluginBase } from '@mnaoumov/obsidian-lib/plugin/plugin';
 import { PluginEventSourceImpl } from '@mnaoumov/obsidian-lib/plugin/plugin-event-source';
 import { getObsidianSearchQueryConstructor } from '@obsidian-typings/obsidian-public-latest/implementations';
-import { Notice } from 'obsidian';
 
 import { IndexedSearchApiImpl } from './api/indexed-search-api-impl.ts';
 import {
@@ -60,6 +58,13 @@ export class Plugin extends PluginBase {
   }
 
   protected override async onloadImpl(): Promise<void> {
+    const pluginSettingsComponent = this.addChild(
+      new PluginSettingsComponent({
+        dataHandler: new PluginDataHandler(this),
+        pluginEventSource: new PluginEventSourceImpl(this)
+      })
+    );
+    this.pluginSettingsComponent = pluginSettingsComponent;
     this.trigramIndexComponentValue = this.addChild(
       new TrigramIndexComponent({
         app: this.app,
@@ -70,6 +75,7 @@ export class Plugin extends PluginBase {
     const searchNarrowingComponent = this.addChild(
       new SearchNarrowingComponent({
         app: this.app,
+        isEnabled: (): boolean => pluginSettingsComponent.settings.shouldNarrowSearch,
         trigramIndexComponent: this.trigramIndexComponentValue
       })
     );
@@ -80,14 +86,6 @@ export class Plugin extends PluginBase {
       selectFiles: searchNarrowingComponent.selectCandidateFiles.bind(searchNarrowingComponent)
     });
 
-    const pluginSettingsComponent = this.addChild(
-      new PluginSettingsComponent({
-        dataHandler: new PluginDataHandler(this),
-        pluginEventSource: new PluginEventSourceImpl(this)
-      })
-    );
-    this.pluginSettingsComponent = pluginSettingsComponent;
-
     this.addChild(
       new PluginSettingsTabComponent({
         plugin: this,
@@ -97,18 +95,6 @@ export class Plugin extends PluginBase {
         })
       })
     );
-
-    this.addCommand({
-      callback: this.runSampleCommand.bind(this),
-      id: 'sample',
-      name: 'Sample'
-    });
-
-    this.addCommand({
-      editorCallback: this.runSampleEditorCommand.bind(this),
-      id: 'sample-editor',
-      name: 'Sample editor'
-    });
 
     // `OpenDemoVaultCommandHandler` is what makes the README's first demo-vault route real: it downloads
     // The `<plugin-id>-demo-vault.zip` attached to the GitHub release and opens it as a vault in
@@ -140,13 +126,5 @@ export class Plugin extends PluginBase {
   private createSearchQuery(query: string, isCaseSensitive: boolean): ObsidianSearchQuery {
     this.searchQueryConstructor ??= getObsidianSearchQueryConstructor(this.app);
     return new this.searchQueryConstructor(this.app, query, isCaseSensitive);
-  }
-
-  private runSampleCommand(): void {
-    new Notice('Sample command');
-  }
-
-  private runSampleEditorCommand(editor: Editor): void {
-    editor.replaceSelection('Sample Editor Command');
   }
 }

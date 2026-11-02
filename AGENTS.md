@@ -25,9 +25,13 @@ None of them speeds up core Search itself while keeping its results. That is thi
 
 ## Current state
 
-The repo was generated on 2026-10-26 with `create-obsidian-plugin` (preset `all-in-one`, CSS, desktop and mobile, the unofficial API subset, no editor extensions). Its answers are in `.create-obsidian-plugin.json`, so re-running the generator in this folder updates every file not edited by hand. Apart from the index, the plugin (`src/main.ts`, `src/plugin*.ts`) is still the generated sample. `src/prototypes/` holds the two measured engine prototypes and their benchmark; the engine is chosen, and the numbers are in "Engine decision" below.
+The repo was generated on 2026-10-26 with `create-obsidian-plugin` (preset `all-in-one`, CSS, desktop and mobile, the unofficial API subset, no editor extensions). Its answers are in `.create-obsidian-plugin.json`, so re-running the generator in this folder updates every file not edited by hand. The scaffold's sample commands and sample setting are gone; the one setting is `shouldNarrowSearch` (default on), which `SearchNarrowingComponent` reads on every search, so off, core Search and the API scan every file while the index stays current. `src/prototypes/` holds the two measured engine prototypes and their benchmark; the engine is chosen, and the numbers are in "Engine decision" below.
 
 **Built:** the persistent trigram index, in `src/trigram-index/` (see "The index as built" below), which the plugin opens at layout ready and keeps current; the core-Search hook with its query translation, in `src/search/` (see "The narrowing as built" below), so core Search reads only the candidates; and the public API, in `src/api/` (see "The search API" below).
+
+**Built: the demo vault, the README and the store screenshots.** `01 Core Search, narrowed` runs queries in the Search pane on `Materials/01 Core Search/`, `02 Settings` switches narrowing, `03 For plugin developers` calls the API. The demo-vault coverage suite checks every `PluginSettings` field is documented. `npm run capture:screenshots` writes three desktop and three mobile frames to `images/screenshots/`: a narrowed search, a regex and `OR` query, and the settings tab. The Android leg runs on the `obsidian_screenshots` AVD (900x1600). The frame queries use words no other note holds (`lantern light`, `/light(house|ship)/ OR thyme`), because a demo note's button code is text a vault-wide query matches too.
+
+**Not yet:** the first release and the directory listing.
 
 ## Design
 

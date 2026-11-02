@@ -13,11 +13,11 @@ export class PluginSettingsTab extends PluginSettingsTabBase<PluginSettings> {
   protected override getSettingDefinitionItems(): SettingDefinitionItem[] {
     return [
       this.settingEx({
-        desc: 'Text setting description.',
-        name: 'Text setting name',
+        desc: 'Core Search reads only the notes the index cannot rule out, with the same results. Turn it off to compare the speed of core Search alone; the index stays current either way.',
+        name: 'Narrow core Search',
         render: (setting) => {
-          setting.addText((text) => {
-            this.bind({ propertyName: 'textSetting', valueComponent: text });
+          setting.addToggle((toggle) => {
+            this.bind({ propertyName: 'shouldNarrowSearch', valueComponent: toggle });
           });
         }
       })
