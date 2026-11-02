@@ -60,6 +60,10 @@ export interface SearchNarrowingComponentConstructorParams {
    */
   readonly app: App;
   /**
+   * Whether narrowing is on; read on every search, so a change applies to the next one.
+   */
+  readonly isEnabled: () => boolean;
+  /**
    * The vault's trigram index.
    */
   readonly trigramIndexComponent: TrigramIndexComponent;
@@ -117,6 +121,7 @@ interface PreparedSearch {
  */
 export class SearchNarrowingComponent extends LayoutReadyComponent {
   private guards: null | SearchMatcherGuards = null;
+  private readonly isEnabled: () => boolean;
   private isPatched = false;
   private readonly log = getDebugger('indexed-search:SearchNarrowing');
   private readonly trigramIndexComponent: TrigramIndexComponent;
@@ -128,6 +133,7 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
    */
   public constructor(params: SearchNarrowingComponentConstructorParams) {
     super(params.app);
+    this.isEnabled = params.isEnabled;
     this.trigramIndexComponent = params.trigramIndexComponent;
   }
 
@@ -138,10 +144,10 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
    * queue is set up and core's own work in `startSearch` finishes.
    *
    * @param searchQuery - The query the search compiled.
-   * @returns The prepared search, or `null` when the index cannot narrow the query.
+   * @returns The prepared search, or `null` when narrowing is off or the index cannot narrow the query.
    */
   public prepare(searchQuery: ObsidianSearchQuery): null | PreparedSearch {
-    if (!searchQuery.matcher) {
+    if (!searchQuery.matcher || !this.isEnabled()) {
       return null;
     }
     const startTime = performance.now();
