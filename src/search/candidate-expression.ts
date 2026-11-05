@@ -13,13 +13,16 @@
  * - Negation turns `null` into a match, so it narrows nothing.
  * - Text, quoted text and regex search the file name and the content of a Markdown note; `file:` and `path:`
  *   restrict them to the name or the path, `content:` to the content.
- * - `tag:` tests core's own `^<tag>($|/)` regex, with `i`, against the note's cached tags.
+ * - `tag:` tests core's own `^<tag>($|/)` regex, with `i`, against the note's cached tags. The tag is escaped from the text
+ *   node's `text`, as core 1.15.1 does: its text node no longer carries a `regex`, which 1.14.5 built the same way.
  */
 
 import type {
   SearchMatcher,
   SearchMatcherGuards
 } from '@obsidian-typings/obsidian-public-latest/implementations';
+
+import { escapeRegExp } from '@mnaoumov/typescript-lib/reg-exp';
 
 import type { TrigramQuery } from '../trigram-index/trigram-query.ts';
 
@@ -155,6 +158,6 @@ function translate(node: SearchMatcher, guards: SearchMatcherGuards, nodeScope: 
   }
   // Core rejects a scope operator nested in another, so `tag:` is translated only outside one.
   return scope === 'contentOrPath' && guards.tag(matcher)
-    ? { kind: 'tag', regex: new RegExp(String.raw`^${matcher.matcher.regex}($|\/)`, 'i') }
+    ? { kind: 'tag', regex: new RegExp(String.raw`^${escapeRegExp(matcher.matcher.text)}($|\/)`, 'i') }
     : ALL_EXPRESSION;
 }
