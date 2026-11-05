@@ -54,7 +54,8 @@ describe('IndexedSearchApiImpl', () => {
     return new IndexedSearchApiImpl({ app: castTo(app), createQuery, selectFiles });
   }
 
-  function contentMatcher(term: string): (file: TFile, content: string) => null | SearchMatchResult {
+  function alphaMatcher(): (file: TFile, content: string) => null | SearchMatchResult {
+    const term = 'alpha';
     return (_file, content) => {
       const index = content.indexOf(term);
       return index === -1 ? null : { content: [[index, index + term.length]] };
@@ -66,7 +67,7 @@ describe('IndexedSearchApiImpl', () => {
     app.vault.createSync__('a.md', 'say alpha');
     app.vault.createSync__('c.md', 'gamma');
 
-    const hits = await createApi(() => fakeQuery({ match: contentMatcher('alpha') })).search('alpha');
+    const hits = await createApi(() => fakeQuery({ match: alphaMatcher() })).search('alpha');
 
     expect(hits.map((hit) => [hit.file.path, hit.match])).toEqual([
       ['a.md', { content: [[4, 9]] }],
@@ -77,7 +78,7 @@ describe('IndexedSearchApiImpl', () => {
   it('should check only the files the selector keeps, handing it the compiled query', async () => {
     app.vault.createSync__('a.md', 'alpha');
     app.vault.createSync__('b.md', 'alpha too');
-    const searchQuery = fakeQuery({ match: contentMatcher('alpha') });
+    const searchQuery = fakeQuery({ match: alphaMatcher() });
     const selectFiles = vi.fn<SearchFileSelector>(async (_searchQuery, files) => {
       await noopAsync();
       return files.filter((file) => file.path !== 'b.md');

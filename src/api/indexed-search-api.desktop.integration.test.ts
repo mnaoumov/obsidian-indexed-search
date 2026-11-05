@@ -156,7 +156,7 @@ describe('the search API against core Search', () => {
     });
   });
 
-  it.each(QUERIES)('answers core\'s own files for $query (case-sensitive: $isCaseSensitive)', async ({ isCaseSensitive, query }) => {
+  it.each(QUERIES)('answers core\'s own files for $query (case-sensitive: $isCaseSensitive)', async ({ isCaseSensitive = false, query }) => {
     const run = await evalInObsidian({
       async callback({ app, folder, isCaseSensitive: isSearchCaseSensitive, lib: { findPluginApi }, pluginId, query: searchQuery }): Promise<ConformanceRun> {
         const api = findPluginApi<IndexedSearchApi>({ apiVersionRange: '^1.0.0', pluginId });
@@ -205,7 +205,7 @@ describe('the search API against core Search', () => {
         const hits = await api.search(searchQuery, { isCaseSensitive: isSearchCaseSensitive });
         return { apiPaths: hits.map((hit) => hit.file.path).filter((path) => isOwn(path)), corePaths };
       },
-      input: { folder: FOLDER, isCaseSensitive: isCaseSensitive ?? false, pluginId: PLUGIN_ID, query },
+      input: { folder: FOLDER, isCaseSensitive, pluginId: PLUGIN_ID, query },
       vaultPath
     });
 

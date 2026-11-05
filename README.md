@@ -29,7 +29,7 @@ Core Search has no index: every query reads every note in the vault and runs its
 
 **The documentation is a demo vault.** Every feature has a note that explains what it does and why you would want it, with a button that runs a search in the Search pane so you can watch it happen.
 
-**[Start reading here](<./demo-vault/00 Start.md>)** — it is plain markdown, so it works on GitHub with nothing installed.
+**[Start reading here](<./demo-vault/00 Start.md>)** — it is plain markdown, so it works on `GitHub` with nothing installed.
 
 A copy of the vault ships with every release. You can access it via any of the following:
 

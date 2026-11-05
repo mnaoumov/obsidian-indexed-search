@@ -65,8 +65,8 @@ describe('id list combination', () => {
 describe('evaluateQuery', () => {
   it('treats a common trigram as every file and a missing one as none', () => {
     const query = literalQuery('abcd');
-    const [first, second] = [...collect(query)];
-    const postings = new Map<number, null | Uint32Array>([[first ?? 0, null], [second ?? 0, Uint32Array.from([2, 4])]]);
+    const [first = 0, second = 0] = [...collect(query)];
+    const postings = new Map<number, null | Uint32Array>([[first, null], [second, Uint32Array.from([2, 4])]]);
     expect([...evaluateQuery(query, postings) ?? []]).toEqual([2, 4]);
     expect([...evaluateQuery(query, new Map()) ?? [-1]]).toEqual([]);
   });

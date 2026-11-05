@@ -42,8 +42,6 @@ interface BenchmarkQuery {
   readonly term: BruteScanTerm;
 }
 
-type EngineName = 'bruteScan' | 'trigram';
-
 interface EngineQueryResult {
   readonly candidateCount: number;
   readonly candidateMedianInMilliseconds: number;
@@ -94,6 +92,7 @@ const results = new Map<string, unknown>([
 ]);
 
 describe('engine benchmark on the 37,000-note corpus', () => {
+  type EngineName = 'bruteScan' | 'trigram';
   let vaultPath = '';
 
   beforeAll(async () => {

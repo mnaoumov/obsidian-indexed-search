@@ -253,11 +253,11 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
       kept.sort(batch.compare);
     }
     const elapsed = elapsedInMilliseconds.toFixed(0);
-    if (excluded) {
-      this.log(`Query "${batch.prepared.searchQuery.query}": ${String(kept.length)} of ${String(batch.files.length)} files queued after ${elapsed} ms`);
-    } else {
-      this.log(`Query "${batch.prepared.searchQuery.query}" got no narrowing from the index in ${elapsed} ms; core scans every file`);
-    }
+    this.log(
+      excluded
+        ? `Query "${batch.prepared.searchQuery.query}": ${String(kept.length)} of ${String(batch.files.length)} files queued after ${elapsed} ms`
+        : `Query "${batch.prepared.searchQuery.query}" got no narrowing from the index in ${elapsed} ms; core scans every file`
+    );
     batch.queue.addList(kept);
   }
 
