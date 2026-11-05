@@ -848,7 +848,7 @@ export class TrigramIndex {
     const live = [...this.getLiveIds(segment)].flatMap((id) => {
       const path = this.paths.get(id);
       const entry = path === undefined ? undefined : this.entries.get(path);
-      return path === undefined || !entry ? [] : [{ entry, path }];
+      return path === undefined || !entry ? [] : { entry, path };
     });
     const postings = new SegmentPostings({ segmentBase, segmentSize: this.segmentSize });
     const stale: string[] = [];
@@ -1024,7 +1024,7 @@ function parseMeta(value: unknown): null | StoredMeta {
     return null;
   }
   const { commonTrigrams, nextId, segmentSize, version } = value as Partial<Record<keyof StoredMeta, unknown>>;
-  return version !== SCHEMA_VERSION || !isNonNegativeInteger(nextId) || !isNonNegativeInteger(segmentSize) || !isTypedArray(commonTrigrams, 'Float64Array') ? null : { commonTrigrams, nextId, segmentSize, version };
+  return version === SCHEMA_VERSION && isNonNegativeInteger(nextId) && isNonNegativeInteger(segmentSize) && isTypedArray(commonTrigrams, 'Float64Array') ? { commonTrigrams, nextId, segmentSize, version } : null;
 }
 
 function parseSegmentFiles(value: unknown, min: number, maxExclusive: number): null | StoredSegmentFiles {

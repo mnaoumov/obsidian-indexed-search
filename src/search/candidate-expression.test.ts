@@ -85,7 +85,8 @@ function or(...matchers: SearchMatcher[]): SearchMatcher {
 }
 
 function text(value: string): SearchTextMatcher {
-  return node('text', strictProxy<SearchTextMatcher>({ regex: value.replaceAll(/[.*+?^${}()|[\]\\/]/gu, String.raw`\$&`), text: value }));
+  // Core 1.15.1's text node carries only `text`, so the strict proxy throws on any read of the `regex` 1.14.5 had.
+  return node('text', strictProxy<SearchTextMatcher>({ text: value }));
 }
 
 function translate(matcher: SearchMatcher): string {
@@ -163,6 +164,8 @@ describe('translateMatcher', () => {
 
   it('builds core\'s own tag regex', () => {
     expect(translate(PLANT_TAG)).toBe(String.raw`tag/^#plant($|\/)/i`);
+    const symbolTag = node('tag', strictProxy<SearchTagMatcher>({ matcher: text('#c++.x') }));
+    expect(translate(symbolTag)).toBe(String.raw`tag/^#c\+\+\.x($|\/)/i`);
   });
 
   it('narrows nothing for an unknown node', () => {

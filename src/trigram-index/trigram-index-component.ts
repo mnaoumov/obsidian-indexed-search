@@ -96,7 +96,7 @@ export class TrigramIndexComponent extends LayoutReadyComponent {
    */
   public async getContentCandidates(query: TrigramQuery): Promise<null | Set<string>> {
     const index = this.index;
-    return !index || !this.isReady ? null : index.candidates(query);
+    return index && this.isReady ? index.candidates(query) : null;
   }
 
   /**

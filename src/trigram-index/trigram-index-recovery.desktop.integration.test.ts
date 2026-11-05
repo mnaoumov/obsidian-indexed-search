@@ -66,8 +66,6 @@ interface RecoveryState {
   readonly setSurvivor: (component: TrigramIndexComponent) => void;
 }
 
-type TrigramIndexComponentConstructor = new (params: TrigramIndexComponentTestParams) => TrigramIndexComponent;
-
 interface TrigramIndexComponentTestParams {
   readonly app: App;
   readonly indexOptions: Omit<TrigramIndexConstructorParams, 'filesStore' | 'log' | 'postingsStore'>;
@@ -90,6 +88,7 @@ describe('trigram index recovery after a kill', () => {
     vaultPath = getTemporaryVault().path;
     await evalInObsidian({
       async callback({ app, folder, noteCount, pluginId, query, segmentSize, storePluginId }) {
+        type TrigramIndexComponentConstructor = new (params: TrigramIndexComponentTestParams) => TrigramIndexComponent;
         const plugin = app.plugins.getPlugin(pluginId) as IndexPlugin | null;
         if (!plugin) {
           throw new Error('Plugin not loaded');
