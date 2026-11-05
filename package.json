@@ -1,6 +1,6 @@
 {
   "name": "indexed-search",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Makes core Search fast on large vaults, with the same results, through a trigram index kept in IndexedDB.",
   "keywords": [],
   "license": "MIT",
