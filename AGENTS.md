@@ -31,7 +31,7 @@ The repo was generated on 2026-10-26 with `create-obsidian-plugin` (preset `all-
 
 **Built: the demo vault, the README and the store screenshots.** `01 Core Search, narrowed` runs queries in the Search pane on `Materials/01 Core Search/`, `02 Settings` switches narrowing, `03 For plugin developers` calls the API. The demo-vault coverage suite checks every `PluginSettings` field is documented. `npm run capture:screenshots` writes three desktop and three mobile frames to `images/screenshots/`: a narrowed search, a regex and `OR` query, and the settings tab. The Android leg runs on the `obsidian_screenshots` AVD (900x1600). The frame queries use words no other note holds (`lantern light`, `/light(house|ship)/ OR thyme`), because a demo note's button code is text a vault-wide query matches too.
 
-**Not yet:** the first release and the directory listing.
+**Released and listed:** 1.0.0 (commit `1ab4e6c`) is live in the community directory at <https://community.obsidian.md/plugins/indexed-search>. Its automated review (read 2026-11-06) is Satisfactory with 7 issues and no manifest or README finding: Medium `fs` and Electron IPC, from the demo-vault opener `@mnaoumov/obsidian-lib` bundles; Info for the demo-vault zip as an extra release file, vault enumeration (inherent to the index), one network call, and the malware and network scans being unavailable. None needs a change.
 
 ## Design
 

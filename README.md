@@ -74,7 +74,7 @@ Last searched for similar plugins on 2026-11-01.
 
 ## Installation
 
-The plugin is not available in [the official Community Plugins repository](https://community.obsidian.md) yet.
+The plugin is available in [the official Community Plugins repository](https://community.obsidian.md/plugins/indexed-search).
 
 ### Beta versions
 
