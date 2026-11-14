@@ -4,6 +4,8 @@
  * Posting lists: sorted file ids, stored as delta varints and combined as sorted `Uint32Array`s.
  */
 
+import { ensureNonNullable } from '@mnaoumov/typescript-lib/type-guards';
+
 import type { TrigramQuery } from './trigram-query.ts';
 
 /**
@@ -80,7 +82,7 @@ export function decodeCheckedPostings(params: DecodeCheckedPostingsParams): null
       if (position >= bytes.length || byteCount === MAX_VARINT_BYTES) {
         return null;
       }
-      byte = bytes[position++] ?? 0;
+      byte = ensureNonNullable(bytes[position++]);
       byteCount++;
       delta += (byte % VARINT_CONTINUATION) * multiplier;
       multiplier *= VARINT_CONTINUATION;
@@ -113,7 +115,7 @@ export function decodePostings(params: DecodePostingsParams): number {
     let byte: number;
     let multiplier = 1;
     do {
-      byte = bytes[position++] ?? 0;
+      byte = ensureNonNullable(bytes[position++], 'The postings end inside a varint');
       delta += (byte % VARINT_CONTINUATION) * multiplier;
       multiplier *= VARINT_CONTINUATION;
     } while (byte >= VARINT_CONTINUATION);
@@ -213,8 +215,8 @@ export function intersect(left: Uint32Array, right: Uint32Array): Uint32Array {
   let rightIndex = 0;
   let count = 0;
   while (leftIndex < left.length && rightIndex < right.length) {
-    const leftId = left[leftIndex] ?? 0;
-    const rightId = right[rightIndex] ?? 0;
+    const leftId = ensureNonNullable(left[leftIndex]);
+    const rightId = ensureNonNullable(right[rightIndex]);
     if (leftId === rightId) {
       result[count++] = leftId;
       leftIndex++;

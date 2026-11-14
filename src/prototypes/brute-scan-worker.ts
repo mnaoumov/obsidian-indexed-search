@@ -4,6 +4,8 @@
  * The brute-scan worker: holds one share of the folded corpus and scans it per request.
  */
 
+/* v8 ignore file -- Not unit tested: a benchmark prototype that runs inside a Web Worker; the desktop performance suite is its test. */
+
 import type {
   LoadRequest,
   ScanRequest,

@@ -5,6 +5,8 @@
  * the benchmark bundles this module as an IIFE named `indexedSearchBenchmark` and loads it as a script there.
  */
 
+/* v8 ignore file -- Not unit tested: the engine benchmark's bundle entry, loaded as a script into a real Obsidian by the desktop performance suite, which is its test. */
+
 import {
   literalQuery,
   regexQuery

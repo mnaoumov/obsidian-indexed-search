@@ -16,6 +16,8 @@
 
 /* eslint-disable unicorn/prefer-code-point -- Core's regexes have no `u` flag, so trigrams are UTF-16 code units. */
 
+import { ensureNonNullable } from '@mnaoumov/typescript-lib/type-guards';
+
 import { getFoldTable } from './case-folding.ts';
 import { packTrigram } from './trigram-query.ts';
 
@@ -92,10 +94,10 @@ export class SegmentPostings {
     if (text.length < TRIGRAM_LENGTH) {
       return;
     }
-    let first = this.foldTable[text.charCodeAt(0)] ?? 0;
-    let second = this.foldTable[text.charCodeAt(1)] ?? 0;
+    let first = ensureNonNullable(this.foldTable[text.charCodeAt(0)]);
+    let second = ensureNonNullable(this.foldTable[text.charCodeAt(1)]);
     for (let index = TRIGRAM_LENGTH - 1; index < text.length; index++) {
-      const third = this.foldTable[text.charCodeAt(index)] ?? 0;
+      const third = ensureNonNullable(this.foldTable[text.charCodeAt(index)]);
       this.addPair(this.getDenseId(packTrigram(first, second, third)), localId);
       first = second;
       second = third;
@@ -110,7 +112,7 @@ export class SegmentPostings {
   public getDocumentFrequencies(): Map<number, number> {
     const frequencies = new Map<number, number>();
     for (const [denseId, trigram] of this.trigramKeys.entries()) {
-      frequencies.set(trigram, this.documentFrequencies[denseId] ?? 0);
+      frequencies.set(trigram, ensureNonNullable(this.documentFrequencies[denseId]));
     }
     return frequencies;
   }
@@ -149,14 +151,14 @@ export class SegmentPostings {
     const isInPlace = sorted instanceof Uint32Array;
     let runStart = 0;
     while (runStart < this.pairCount) {
-      const denseId = Math.floor((sorted[runStart] ?? 0) / this.segmentSize);
+      const denseId = Math.floor(ensureNonNullable(sorted[runStart]) / this.segmentSize);
       let runEnd = runStart;
-      while (runEnd < this.pairCount && Math.floor((sorted[runEnd] ?? 0) / this.segmentSize) === denseId) {
-        sorted[runEnd] = this.segmentBase + ((sorted[runEnd] ?? 0) % this.segmentSize);
+      while (runEnd < this.pairCount && Math.floor(ensureNonNullable(sorted[runEnd]) / this.segmentSize) === denseId) {
+        sorted[runEnd] = this.segmentBase + (ensureNonNullable(sorted[runEnd]) % this.segmentSize);
         runEnd++;
       }
       const ids = isInPlace ? sorted.subarray(runStart, runEnd) : Uint32Array.from(sorted.subarray(runStart, runEnd));
-      yield { ids, trigram: this.trigramKeys[denseId] ?? 0 };
+      yield { ids, trigram: ensureNonNullable(this.trigramKeys[denseId]) };
       runStart = runEnd;
     }
   }
@@ -166,7 +168,7 @@ export class SegmentPostings {
       return;
     }
     this.lastSeen[denseId] = localId;
-    this.documentFrequencies[denseId] = (this.documentFrequencies[denseId] ?? 0) + 1;
+    this.documentFrequencies[denseId] = ensureNonNullable(this.documentFrequencies[denseId]) + 1;
     if (this.pairCount === this.pairs.length) {
       this.pairs = this.copyPairs(this.pairs.length * GROWTH_FACTOR, this.pairs instanceof Float64Array);
     }

@@ -4,6 +4,8 @@
  * What the engine benchmark keeps in the renderer between its steps.
  */
 
+/* v8 ignore file -- Not unit tested: benchmark state kept in the renderer between the performance suite's callbacks, which are its test. */
+
 import type { BruteScanEngine } from './brute-scan-engine.ts';
 import type {
   IndexedFile,

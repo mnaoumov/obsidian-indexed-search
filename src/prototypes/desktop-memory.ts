@@ -5,6 +5,8 @@
  * The benchmark runs only in the desktop renderer, where these are the measurement.
  */
 
+/* v8 ignore file -- Not unit tested: it reads the Electron renderer's process memory and forces V8 garbage collection, which only a real renderer can measure. */
+
 import {
   invokeAsyncSafely,
   sleep

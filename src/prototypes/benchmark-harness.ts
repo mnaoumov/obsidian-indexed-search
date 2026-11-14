@@ -5,6 +5,8 @@
  * forced garbage collection. They run only in the desktop renderer, under the desktop performance suite.
  */
 
+/* v8 ignore file -- Not unit tested: benchmark helpers that time core Search in a real Obsidian; the desktop performance suite is their test. */
+
 import type {
   SearchQueueStartOptions,
   SearchView

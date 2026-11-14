@@ -23,6 +23,7 @@ import type {
 } from '@obsidian-typings/obsidian-public-latest/implementations';
 
 import { escapeRegExp } from '@mnaoumov/typescript-lib/reg-exp';
+import { ensureNonNullable } from '@mnaoumov/typescript-lib/type-guards';
 
 import type { TrigramQuery } from '../trigram-index/trigram-query.ts';
 
@@ -115,7 +116,7 @@ function combine(kind: 'and' | 'or', children: readonly CandidateExpression[]): 
   if (flat.length === 0) {
     return ALL_EXPRESSION;
   }
-  return flat.length === 1 ? flat[0] ?? ALL_EXPRESSION : { children: flat, kind };
+  return flat.length === 1 ? ensureNonNullable(flat[0]) : { children: flat, kind };
 }
 
 function term(query: TrigramQuery, scope: TermScope): CandidateExpression {

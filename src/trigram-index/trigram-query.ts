@@ -15,6 +15,7 @@ import type {
   RootNode
 } from 'regjsparser';
 
+import { ensureNonNullable } from '@mnaoumov/typescript-lib/type-guards';
 import { parse } from 'regjsparser';
 
 import {
@@ -208,7 +209,7 @@ export function findTrigrams(text: string, wanted: ReadonlySet<number>): Set<num
   let first = 0;
   let second = 0;
   for (let index = 0; index < text.length; index++) {
-    const third = foldTable[text.charCodeAt(index)] ?? 0;
+    const third = ensureNonNullable(foldTable[text.charCodeAt(index)]);
     if (index >= TRIGRAM_LENGTH - 1) {
       const trigram = packTrigram(first, second, third);
       if (wanted.has(trigram)) {
@@ -373,7 +374,7 @@ function wrap(kind: 'and' | 'or', children: TrigramQuery[], empty: TrigramQuery)
   if (children.length === 0) {
     return empty;
   }
-  return children.length === 1 ? children[0] ?? empty : { children, kind };
+  return children.length === 1 ? ensureNonNullable(children[0]) : { children, kind };
 }
 
 const MAX_EXACT_SET_SIZE = 16;
@@ -438,12 +439,13 @@ class RegexAnalyzer {
   }
 
   private alternateAll(nodes: readonly AstNode<RegexFeatures>[]): RegexInfo {
-    let info: null | RegexInfo = null;
-    for (const node of nodes) {
-      const nodeInfo = this.info(node);
-      info = info ? this.alternate(info, nodeInfo) : nodeInfo;
+    // A disjunction always has at least two alternatives.
+    const [first, ...rest] = nodes;
+    let info = this.info(ensureNonNullable(first));
+    for (const node of rest) {
+      info = this.alternate(info, this.info(node));
     }
-    return info ?? EMPTY_INFO;
+    return info;
   }
 
   private characterClass(node: CharacterClass): RegexInfo {
@@ -514,7 +516,8 @@ class RegexAnalyzer {
   }
 
   private fold(codePoint: number): number {
-    return this.foldTable[codePoint] ?? codePoint;
+    // Without `u`, a class holds UTF-16 code units, every one of which the table folds.
+    return ensureNonNullable(this.foldTable[codePoint]);
   }
 
   private info(node: AstNode<RegexFeatures>): RegexInfo {
