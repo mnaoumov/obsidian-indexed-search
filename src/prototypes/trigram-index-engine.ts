@@ -10,6 +10,8 @@
  * least `commonShare` of the files are deleted after the build and treated as "every file".
  */
 
+/* v8 ignore file -- Not unit tested: the benchmark prototype the shipped index in src/trigram-index replaced; only the desktop performance suite measures it. */
+
 /* eslint-disable unicorn/prefer-code-point -- Core's regexes have no `u` flag, so trigrams are UTF-16 code units. */
 
 import type { TrigramQuery } from '../trigram-index/trigram-query.ts';

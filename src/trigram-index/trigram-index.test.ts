@@ -263,6 +263,18 @@ describe('TrigramIndex', () => {
     expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['a.md', 'e.md']);
   });
 
+  it('marks a segment damaged once when a query meets several of its damaged records', async () => {
+    const vault = sampleVault();
+    const { index, logs, postingsStore } = await openHarness(new IDBFactory());
+    await index.sync(vault.list(), vault.read);
+    await postingsStore.set(`p:${packedTrigramKey('QUI')}:0`, new Uint8Array([0x80]));
+    await postingsStore.set(`p:${packedTrigramKey('UIL')}:0`, new Uint8Array([0x80]));
+
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['a.md', 'b.md', 'c.md', 'd.md', 'e.md']);
+    await index.idle();
+    expect(logs.filter((line) => line.includes('is damaged'))).toHaveLength(1);
+  });
+
   it('treats a missing segment trigram list as every file of its segment after a restart', async () => {
     const factory = new IDBFactory();
     const vault = sampleVault();
@@ -276,6 +288,19 @@ describe('TrigramIndex', () => {
     expect(await candidatePaths(second.index, vault, 'quillwort')).toEqual(['a.md', 'e.md', 'f.md', 'g.md', 'h.md']);
     await second.index.maintain(vault.read, vault.stat);
     expect(await candidatePaths(second.index, vault, 'quillwort')).toEqual(['a.md', 'e.md']);
+  });
+
+  it('treats an unsorted segment trigram list as every file of its segment after a restart', async () => {
+    const factory = new IDBFactory();
+    const vault = sampleVault();
+    const first = await openHarness(factory);
+    await first.index.sync(vault.list(), vault.read);
+    await first.postingsStore.set('t:1', new Float64Array([2, 1]));
+    first.index.close();
+
+    const second = await openHarness(factory);
+    expect(second.logs.some((line) => line.includes('segment 1'))).toBe(true);
+    expect(await candidatePaths(second.index, vault, 'quillwort')).toEqual(['a.md', 'e.md', 'f.md', 'g.md', 'h.md']);
   });
 
   it('drops a damaged file record and indexes its file again', async () => {
@@ -442,6 +467,243 @@ describe('TrigramIndex', () => {
     }
     expect(writeCount).toBeGreaterThan(10);
   }, KILL_TEST_TIMEOUT_IN_MILLISECONDS);
+
+  it('works with the default build settings', async () => {
+    const vault = sampleVault();
+    const { index } = await openHarness(new IDBFactory(), {});
+    await index.sync(vault.list(), vault.read);
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(vault.matching('quillwort'));
+  });
+
+  it('selects every file for a query that narrows nothing', async () => {
+    const vault = sampleVault();
+    const { index } = await openHarness(new IDBFactory());
+    await index.sync(vault.list(), vault.read);
+    const files = await index.selectCandidates(vault.list(), { kind: 'all' });
+    expect(files.map((file) => file.path)).toEqual(vault.list().map((file) => file.path));
+  });
+
+  it.each([
+    { name: 'that does not decode', record: new Uint8Array([0x80]) },
+    { name: 'that is not binary', record: [4] }
+  ])('treats a posting record $name, met while appending, as every file of its segment until rebuilt', async ({ record }) => {
+    const vault = new FakeVault({
+      'a.md': 'The quillwort grows by the harbour.',
+      'b.md': 'Nothing to see.',
+      'c.md': 'A silver harbour lantern.',
+      'd.md': 'another plain note',
+      'e.md': 'quillwort again, in a second segment',
+      'f.md': 'journal'
+    });
+    const { index, logs, postingsStore } = await openHarness(new IDBFactory());
+    await index.sync(vault.list(), vault.read);
+    await postingsStore.set(`p:${packedTrigramKey('QUI')}:1`, record);
+
+    vault.write('g.md', 'more quillwort');
+    await index.update(vault.list(), vault.read);
+
+    expect(logs.some((line) => line.includes(`posting record p:${packedTrigramKey('QUI')}:1 is damaged`))).toBe(true);
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['a.md', 'e.md', 'f.md', 'g.md']);
+    await index.maintain(vault.read, vault.stat);
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['a.md', 'e.md', 'g.md']);
+  });
+
+  it('appends to an empty posting record from its segment\'s first id', async () => {
+    const vault = new FakeVault({
+      'a.md': 'Nothing to see.',
+      'b.md': 'still nothing',
+      'c.md': 'nothing again',
+      'd.md': 'nothing more',
+      'e.md': 'quillwort again, in a second segment'
+    });
+    const { index, logs, postingsStore } = await openHarness(new IDBFactory());
+    await index.sync(vault.list(), vault.read);
+    await postingsStore.set(`p:${packedTrigramKey('QUI')}:1`, new Uint8Array(0));
+
+    vault.write('f.md', 'more quillwort');
+    await index.update(vault.list(), vault.read);
+
+    expect(logs).toEqual([]);
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['f.md']);
+  });
+
+  it('writes no trigram list for a segment that gains no new trigram', async () => {
+    const vault = new FakeVault({
+      'a.md': 'Nothing to see.',
+      'b.md': 'still nothing',
+      'c.md': 'nothing again',
+      'd.md': 'nothing more',
+      'e.md': 'quillwort again'
+    });
+    const { index, postingsStore } = await openHarness(new IDBFactory());
+    await index.sync(vault.list(), vault.read);
+    const set = vi.spyOn(postingsStore, 'set');
+
+    vault.write('f.md', 'quillwort again');
+    await index.update(vault.list(), vault.read);
+
+    expect(set.mock.calls.map(([key]) => key)).not.toContain('t:1');
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['e.md', 'f.md']);
+  });
+
+  it('keeps a renamed file\'s journal record over the packed record of its old path after a restart', async () => {
+    const factory = new IDBFactory();
+    const vault = sampleVault();
+    const first = await openHarness(factory);
+    await first.index.sync(vault.list(), vault.read);
+    first.index.close();
+
+    const folded = await openHarness(factory, { ...SMALL_SEGMENT, journalLimit: 2 });
+    vault.rename('e.md', 'a0.md');
+    await folded.index.rename('e.md', 'a0.md');
+    folded.index.close();
+
+    const restarted = await openHarness(factory, { ...SMALL_SEGMENT, journalLimit: 2 });
+    expect(restarted.index.getIndexedFileCount()).toBe(8);
+    expect(await candidatePaths(restarted.index, vault, 'quillwort')).toEqual(['a.md', 'a0.md']);
+  });
+
+  it('deletes the earlier segments\' records of a trigram found common in a later one', async () => {
+    const texts: Record<string, string> = {};
+    for (let index = 0; index < 12; index++) {
+      texts[`note-${String(index)}.md`] = `common text ${String(index)}${index === 5 ? ' rare' : ''}`;
+    }
+    const vault = new FakeVault(texts);
+    const { index, logs, postingsStore } = await openHarness(new IDBFactory(), { ...SMALL_SEGMENT, commonShare: 0.9, minCommonFiles: 6 });
+    await index.sync(vault.list(), vault.read);
+    async function commonKeys(): Promise<string[]> {
+      const keys = await storedKeys(postingsStore);
+      return keys.filter((key) => key.startsWith(`p:${packedTrigramKey('COM')}:`));
+    }
+
+    expect(await commonKeys()).toEqual([]);
+    expect(await index.candidates(literalQuery('common'))).toBeNull();
+
+    // A rebuild of a segment skips the common trigram as well.
+    vault.write('note-0.md', 'common text 0 again');
+    await index.sync(vault.list(), vault.read);
+    await index.maintain(vault.read, vault.stat);
+    expect(logs).toContain('Rebuilt segment 0 of the trigram index from 3 files.');
+    expect(await commonKeys()).toEqual([]);
+    expect(await candidatePaths(index, vault, 'rare')).toEqual(['note-5.md']);
+  });
+
+  it('drops the packed record of a segment whose files are all gone', async () => {
+    const vault = sampleVault();
+    const { filesStore, index } = await openHarness(new IDBFactory(), { ...SMALL_SEGMENT, journalLimit: 0 });
+    await index.sync(vault.list(), vault.read);
+    expect(await storedKeys(filesStore)).toEqual(['meta', 's:0', 's:1']);
+
+    await index.remove(['e.md', 'f.md', 'g.md', 'h.md']);
+
+    expect(await storedKeys(filesStore)).toEqual(['meta', 's:0']);
+    expect(index.getIndexedFileCount()).toBe(4);
+  });
+
+  it('forgets, when it rebuilds a segment, a file that is gone', async () => {
+    const factory = new IDBFactory();
+    const vault = sampleVault();
+    const first = await openHarness(factory);
+    await first.index.sync(vault.list(), vault.read);
+    await first.postingsStore.delete('t:0');
+    first.index.close();
+
+    const second = await openHarness(factory);
+    vault.delete('a.md');
+    await second.index.maintain(vault.read, vault.stat);
+
+    expect(second.index.getIndexedFileCount()).toBe(7);
+    expect(await candidatePaths(second.index, vault, 'quillwort')).toEqual(['e.md']);
+  });
+
+  it('reads nothing more once closed mid-build', async () => {
+    const vault = sampleVault();
+    const { index } = await openHarness(new IDBFactory(), { ...SMALL_SEGMENT, readConcurrency: 1 });
+    async function read(file: IndexedFileStat): Promise<null | string> {
+      index.close();
+      return vault.read(file);
+    }
+
+    await expect(index.sync(vault.list(), read)).rejects.toThrow();
+    expect(vault.reads).toEqual(['a.md']);
+  });
+
+  it('remembers how many ids a rebuild found dead across a restart', async () => {
+    const factory = new IDBFactory();
+    const vault = sampleVault();
+    const first = await openHarness(factory);
+    await first.index.sync(vault.list(), vault.read);
+    vault.write('a.md', 'rewritten once');
+    vault.write('b.md', 'rewritten twice');
+    await first.index.sync(vault.list(), vault.read);
+    await first.index.maintain(vault.read, vault.stat);
+    expect(first.logs.filter((line) => line.startsWith('Rebuilt segment 0'))).toHaveLength(1);
+    first.index.close();
+
+    const second = await openHarness(factory);
+    await second.index.maintain(vault.read, vault.stat);
+    expect(second.logs.filter((line) => line.startsWith('Rebuilt segment'))).toEqual([]);
+  });
+
+  it.each([
+    { key: 'f:a.md', name: 'a journal record that is not an object', value: 'garbage' },
+    { key: 's:0', name: 'a segment record that is not an object', value: 'garbage' },
+    { key: 's:0', name: 'a segment record with untyped ids', value: { ids: [0], mtimes: new Float64Array(1), paths: ['a.md'], sizes: new Float64Array(1) } },
+    {
+      key: 's:0',
+      name: 'a segment record of mismatched lengths',
+      value: { ids: new Float64Array(2), mtimes: new Float64Array(1), paths: ['a.md'], sizes: new Float64Array(1) }
+    },
+    { key: 's:x', name: 'a record named for no segment', value: 'garbage' },
+    { key: 's:01', name: 'a record named for a segment in another form', value: 'garbage' }
+  ])('drops $name and indexes its files again', async ({ key, value }) => {
+    const factory = new IDBFactory();
+    const vault = sampleVault();
+    const options: IndexOptions = { ...SMALL_SEGMENT, journalLimit: 0 };
+    const first = await openHarness(factory, options);
+    await first.index.sync(vault.list(), vault.read);
+    await first.filesStore.set(key, value);
+    first.index.close();
+
+    const second = await openHarness(factory, options);
+    expect(second.logs).toContain(`Dropping the damaged trigram index record ${key}; its files are indexed again.`);
+    expect(await storedKeys(second.filesStore)).not.toContain(key);
+    await second.index.sync(vault.list(), vault.read);
+    expect(second.index.getIndexedFileCount()).toBe(8);
+    expect(await candidatePaths(second.index, vault, 'quillwort')).toEqual(['a.md', 'e.md']);
+  });
+
+  it.each([
+    { duplicatedPath: 'n0.md', name: 'is read after', segmentKey: 's:1' },
+    { duplicatedPath: 'n2.md', name: 'is read before', segmentKey: 's:10' }
+  ])('keeps the newer id of a path in two segment records, when the newer record $name the older', async ({ duplicatedPath, segmentKey }) => {
+    const texts: Record<string, string> = {};
+    for (let note = 0; note < 11; note++) {
+      texts[`n${String(note)}.md`] = `note number ${String(note)}`;
+    }
+    const factory = new IDBFactory();
+    const vault = new FakeVault(texts);
+    const options: IndexOptions = { ...SMALL_SEGMENT, journalLimit: 0, segmentSize: 1 };
+    const first = await openHarness(factory, options);
+    await first.index.sync(vault.list(), vault.read);
+    const id = Number(segmentKey.slice('s:'.length));
+    await first.filesStore.set(segmentKey, {
+      ids: new Float64Array([id]),
+      mtimes: new Float64Array([999]),
+      paths: [duplicatedPath],
+      sizes: new Float64Array([1])
+    });
+    first.index.close();
+
+    const second = await openHarness(factory, options);
+
+    expect(second.index.isIndexed({ mtime: 999, path: duplicatedPath, size: 1 })).toBe(true);
+    expect(second.index.getIndexedFileCount()).toBe(10);
+    second.index.close();
+    const third = await openHarness(factory, options);
+    expect(third.index.isIndexed({ mtime: 999, path: duplicatedPath, size: 1 })).toBe(true);
+    expect(third.logs).toEqual([]);
+  });
 });
 
 /**

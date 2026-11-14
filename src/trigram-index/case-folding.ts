@@ -10,6 +10,8 @@
  * exact for `i` and a superset for case-sensitive queries.
  */
 
+import { ensureNonNullable } from '@mnaoumov/typescript-lib/type-guards';
+
 /* eslint-disable unicorn/prefer-code-point -- Core's regexes have no `u` flag, so they compare UTF-16 code units, and so must the fold. */
 
 const CODE_UNIT_COUNT = 0x1_00_00;
@@ -30,7 +32,7 @@ export function foldText(text: string): string {
     const end = Math.min(start + FOLD_CHUNK_SIZE, text.length);
     const codes = new Uint16Array(end - start);
     for (let index = start; index < end; index++) {
-      codes[index - start] = FOLD_TABLE[text.charCodeAt(index)] ?? 0;
+      codes[index - start] = ensureNonNullable(FOLD_TABLE[text.charCodeAt(index)]);
     }
     folded += String.fromCharCode(...codes);
   }

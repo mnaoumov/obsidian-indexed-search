@@ -1,8 +1,11 @@
+import { castTo } from '@mnaoumov/typescript-lib/object-utils';
 import {
   describe,
   expect,
   it
 } from 'vitest';
+
+import type { TrigramQuery } from './trigram-query.ts';
 
 import {
   decodeCheckedPostings,
@@ -26,6 +29,12 @@ describe('posting codec', () => {
 
   it('spends one byte per small gap', () => {
     expect(encodePostings([5, 6, 7], 5)).toHaveLength(3);
+  });
+
+  it('refuses a list that ends inside a varint', () => {
+    expect(() => decodePostings({ base: 0, bytes: new Uint8Array([0x81]), offset: 0, target: new Uint32Array(1) })).toThrow(
+      'The postings end inside a varint'
+    );
   });
 });
 
@@ -73,6 +82,23 @@ describe('evaluateQuery', () => {
 
   it('returns every file for an all query', () => {
     expect(evaluateQuery(literalQuery('ab'), new Map())).toBeNull();
+  });
+
+  it('returns no file for a none query', () => {
+    expect([...evaluateQuery({ kind: 'none' }, new Map()) ?? [-1]]).toEqual([]);
+  });
+
+  it('unites OR children, and returns every file once a child does', () => {
+    const postings = new Map<number, null | Uint32Array>([[1, Uint32Array.from([2, 4])], [2, Uint32Array.from([3, 4])], [3, null]]);
+    const one: TrigramQuery = { kind: 'trigram', trigram: 1 };
+    const two: TrigramQuery = { kind: 'trigram', trigram: 2 };
+    const common: TrigramQuery = { kind: 'trigram', trigram: 3 };
+    expect([...evaluateQuery({ children: [one, two], kind: 'or' }, postings) ?? []]).toEqual([2, 3, 4]);
+    expect(evaluateQuery({ children: [one, common, two], kind: 'or' }, postings)).toBeNull();
+  });
+
+  it('rejects an unknown query kind', () => {
+    expect(() => evaluateQuery(castTo<TrigramQuery>({ kind: 'unknown' }), new Map())).toThrow('Unknown query kind');
   });
 });
 

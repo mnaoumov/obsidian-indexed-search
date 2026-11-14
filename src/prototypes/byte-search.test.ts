@@ -26,6 +26,18 @@ describe('findFilesContaining', () => {
     expect([...findFilesContaining({ bytes, offsets, pattern: encoder.encode('abc') })]).toEqual([0, 4]);
   });
 
+  it('reports every file for an empty pattern', () => {
+    const bytes = encoder.encode('abcd');
+    const offsets = Uint32Array.from([0, 1, 1, 4]);
+    expect([...findFilesContaining({ bytes, offsets, pattern: new Uint8Array(0) })]).toEqual([0, 1, 2]);
+  });
+
+  it('rejects a candidate whose last byte matches but whose start does not', () => {
+    const bytes = encoder.encode('xbc ybc');
+    const offsets = Uint32Array.from([0, bytes.length]);
+    expect([...findFilesContaining({ bytes, offsets, pattern: encoder.encode('abc') })]).toEqual([]);
+  });
+
   it('finds a multi-byte pattern', () => {
     const bytes = encoder.encode('ЖУРАВЛИНА');
     const offsets = Uint32Array.from([0, bytes.length]);

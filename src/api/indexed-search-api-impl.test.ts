@@ -135,6 +135,42 @@ describe('IndexedSearchApiImpl', () => {
     expect(contents).toEqual([['kept.md', 'alpha']]);
   });
 
+  it('should read the text of notes and canvases only, matching any other supported file as empty text', async () => {
+    app.vault.createSync__('note.md', 'alpha');
+    app.vault.createSync__('board.canvas', '{"nodes":[]}');
+    app.vault.createSync__('paper.pdf', 'binary');
+    Object.assign(app.metadataCache, { isSupportedFile: (): boolean => true });
+    const contents: [string, string][] = [];
+
+    await createApi(() =>
+      fakeQuery({
+        match: (file, content) => {
+          contents.push([file.path, content]);
+          return null;
+        }
+      })
+    ).search('alpha');
+
+    expect(contents.sort()).toEqual([['board.canvas', '{"nodes":[]}'], ['note.md', 'alpha'], ['paper.pdf', '']]);
+  });
+
+  it('should read no text when the compiled query states no inputs', async () => {
+    app.vault.createSync__('note.md', 'alpha');
+    const contents: string[] = [];
+    const searchQuery = castTo<ObsidianSearchQuery>({
+      match: (_file: TFile, content: string) => {
+        contents.push(content);
+        return null;
+      },
+      matcher: {},
+      requiredInputs: null
+    });
+
+    await createApi(() => searchQuery).search('alpha');
+
+    expect(contents).toEqual(['']);
+  });
+
   it('should match an unreadable file as empty text, as core does', async () => {
     app.vault.createSync__('a.md', 'alpha');
     const error = new Error('read failed');

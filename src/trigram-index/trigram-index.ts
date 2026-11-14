@@ -21,6 +21,7 @@
 import type { LocalDataStore } from '@mnaoumov/obsidian-lib/data-stores/local-data-store';
 
 import { noopAsync } from '@mnaoumov/typescript-lib/function';
+import { ensureNonNullable } from '@mnaoumov/typescript-lib/type-guards';
 
 import type { SegmentPostingRun } from './segment-postings.ts';
 import type { TrigramQuery } from './trigram-query.ts';
@@ -297,7 +298,8 @@ export class TrigramIndex {
     let tail: Promise<unknown>;
     do {
       tail = this.tail;
-      await tail.catch(() => undefined);
+      // `enqueue` keeps the tail from ever rejecting.
+      await tail;
     } while (tail !== this.tail);
   }
 
@@ -613,9 +615,9 @@ export class TrigramIndex {
       files.sort(([left], [right]) => left - right);
       entries.push([toSegmentFilesKey(segment), {
         ids: Float64Array.from(files, ([id]) => id),
-        mtimes: Float64Array.from(files, ([, path]) => this.entries.get(path)?.mtime ?? 0),
+        mtimes: Float64Array.from(files, ([, path]) => ensureNonNullable(this.entries.get(path)).mtime),
         paths: files.map(([, path]) => path),
-        sizes: Float64Array.from(files, ([, path]) => this.entries.get(path)?.size ?? 0)
+        sizes: Float64Array.from(files, ([, path]) => ensureNonNullable(this.entries.get(path)).size)
       }]);
     }
     await this.filesStore.commit({ entries, removedKeys: keys });
@@ -752,7 +754,11 @@ export class TrigramIndex {
         continue;
       }
       for (const [index, path] of files.paths.entries()) {
-        const entry: FileEntry = { id: files.ids[index] ?? 0, mtime: files.mtimes[index] ?? 0, size: files.sizes[index] ?? 0 };
+        const entry: FileEntry = {
+          id: ensureNonNullable(files.ids[index]),
+          mtime: ensureNonNullable(files.mtimes[index]),
+          size: ensureNonNullable(files.sizes[index])
+        };
         const existing = this.entries.get(path);
         if (existing) {
           // A path in two segment records is damage; the newer id wins and both records are rewritten.
@@ -845,10 +851,9 @@ export class TrigramIndex {
 
   private async rebuildSegment(segment: number, read: ReadIndexedFile, stat: StatIndexedFile): Promise<void> {
     const segmentBase = segment * this.segmentSize;
-    const live = [...this.getLiveIds(segment)].flatMap((id) => {
-      const path = this.paths.get(id);
-      const entry = path === undefined ? undefined : this.entries.get(path);
-      return path === undefined || !entry ? [] : { entry, path };
+    const live = Array.from(this.getLiveIds(segment), (id) => {
+      const path = ensureNonNullable(this.paths.get(id));
+      return { entry: ensureNonNullable(this.entries.get(path)), path };
     });
     const postings = new SegmentPostings({ segmentBase, segmentSize: this.segmentSize });
     const stale: string[] = [];
@@ -982,7 +987,7 @@ function hasTrigram(trigrams: Float64Array, trigram: number): boolean {
   let high = trigrams.length - 1;
   while (low <= high) {
     const middle = Math.floor((low + high) / HALF_DIVISOR);
-    const value = trigrams[middle] ?? 0;
+    const value = ensureNonNullable(trigrams[middle]);
     if (value === trigram) {
       return true;
     }
@@ -1004,7 +1009,7 @@ function isSortedTrigramList(value: unknown): value is Float64Array {
     return false;
   }
   for (let index = 1; index < value.length; index++) {
-    if ((value[index - 1] ?? 0) >= (value[index] ?? 0)) {
+    if (ensureNonNullable(value[index - 1]) >= ensureNonNullable(value[index])) {
       return false;
     }
   }
@@ -1044,7 +1049,7 @@ function parseSegmentFiles(value: unknown, min: number, maxExclusive: number): n
   }
   let previousId = min - 1;
   for (let index = 0; index < count; index++) {
-    const id = ids[index] ?? -1;
+    const id = ensureNonNullable(ids[index]);
     if (
       !Number.isSafeInteger(id) || id <= previousId || id >= maxExclusive || typeof paths[index] !== 'string'
       || !Number.isFinite(mtimes[index]) || !isNonNegativeInteger(sizes[index])

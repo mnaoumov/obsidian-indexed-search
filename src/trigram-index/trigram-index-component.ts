@@ -211,7 +211,7 @@ export class TrigramIndexComponent extends LayoutReadyComponent {
 
   private handleDelete(file: TAbstractFile): void {
     this.pendingPaths.delete(file.path);
-    if (this.index && file instanceof TFile) {
+    if (file instanceof TFile) {
       this.runIndexOperationSafely(async (index) => index.remove([file.path]));
     }
   }
@@ -222,9 +222,6 @@ export class TrigramIndexComponent extends LayoutReadyComponent {
     }
     if (this.pendingPaths.delete(oldPath)) {
       this.pendingPaths.add(file.path);
-    }
-    if (!this.index) {
-      return;
     }
     if (isMarkdownFile(file)) {
       this.runIndexOperationSafely(async (index) => index.rename(oldPath, file.path));

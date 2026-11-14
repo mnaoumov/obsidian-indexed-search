@@ -117,6 +117,12 @@ describe('prefetchContentCandidates', () => {
     expect(lookups).toHaveLength(2);
   });
 
+  it('starts no read for an expression with no content term', () => {
+    const lookups: string[] = [];
+    prefetchContentCandidates({ children: [{ kind: 'all' }, term('quillwort', 'path')], kind: 'or' }, createSource(lookups));
+    expect(lookups).toEqual([]);
+  });
+
   it('reads a query outside the expression through the original source', async () => {
     const lookups: string[] = [];
     const source = prefetchContentCandidates({ kind: 'tag', regex: /^#plant/i }, createSource(lookups));

@@ -4,6 +4,8 @@
  * Literal search over a buffer of back-to-back files, reporting each file that contains the pattern once.
  */
 
+import { ensureNonNullable } from '@mnaoumov/typescript-lib/type-guards';
+
 const BYTE_VALUES = 256;
 
 /**
@@ -38,19 +40,19 @@ export function findFilesContaining(params: FindFilesContainingParams): Uint32Ar
   }
   const shifts = new Uint32Array(BYTE_VALUES).fill(patternLength);
   for (let index = 0; index < patternLength - 1; index++) {
-    shifts[pattern[index] ?? 0] = patternLength - 1 - index;
+    shifts[ensureNonNullable(pattern[index])] = patternLength - 1 - index;
   }
-  const lastPatternByte = pattern[patternLength - 1] ?? 0;
+  const lastPatternByte = ensureNonNullable(pattern[patternLength - 1]);
   let fileIndex = 0;
-  let fileEnd = offsets[1] ?? 0;
-  let position = offsets[0] ?? 0;
-  const end = offsets[fileCount] ?? 0;
+  let fileEnd = ensureNonNullable(offsets[1]);
+  let position = ensureNonNullable(offsets[0]);
+  const end = ensureNonNullable(offsets[fileCount]);
   while (position + patternLength <= end) {
-    const lastByte = bytes[position + patternLength - 1] ?? 0;
+    const lastByte = ensureNonNullable(bytes[position + patternLength - 1]);
     if (lastByte === lastPatternByte && isMatchAt(bytes, pattern, position)) {
       while (position >= fileEnd) {
         fileIndex++;
-        fileEnd = offsets[fileIndex + 1] ?? end;
+        fileEnd = ensureNonNullable(offsets[fileIndex + 1]);
       }
       if (position + patternLength <= fileEnd) {
         result[count++] = fileIndex;
@@ -58,7 +60,7 @@ export function findFilesContaining(params: FindFilesContainingParams): Uint32Ar
         continue;
       }
     }
-    position += shifts[lastByte] ?? patternLength;
+    position += ensureNonNullable(shifts[lastByte]);
   }
   return result.slice(0, count);
 }

@@ -9,6 +9,8 @@
  * is persisted: every start rebuilds the buffers from the files.
  */
 
+/* v8 ignore file -- Not unit tested: a benchmark prototype that scans in Web Workers of the renderer; the desktop performance suite is its test. */
+
 /* eslint-disable n/no-unsupported-features/node-builtins -- `Worker` and object URLs are Web APIs of the renderer, not Node builtins. */
 
 import type {
