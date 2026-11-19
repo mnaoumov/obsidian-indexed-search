@@ -102,7 +102,7 @@ Contributions are welcome — see [CONTRIBUTING](./CONTRIBUTING.md) to get set u
 
 <!-- markdownlint-disable MD033 -->
 
-<a href="https://www.buymeacoffee.com/mnaoumov" target="_blank">Support this plugin</a>
+<a href="https://www.buymeacoffee.com/mnaoumov" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="60" width="217"></a>
 
 <!-- markdownlint-enable MD033 -->
 
