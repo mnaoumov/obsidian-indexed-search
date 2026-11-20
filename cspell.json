@@ -32,6 +32,7 @@
     "edgedriver",
     "eresolve",
     "esbuild",
+    "excalidraw",
     "foobax",
     "foobaz",
     "frontmatter",
@@ -44,6 +45,7 @@
     "inlines",
     "jiti",
     "katex",
+    "kittenwort",
     "lezer",
     "liberapay",
     "linkinator",
@@ -88,12 +90,15 @@
     "wikilinks",
     "xfoo",
     "xxabcxxabc",
+    "zebrawort",
+    "zebrawortcalamintx",
     "zipf",
     "σοφος",
     "журавлина"
   ],
   "ignoreRegExpList": [
-    "/GHSA(-[0-9a-z]{4}){3}/g"
+    "/GHSA(-[0-9a-z]{4}){3}/g",
+    "/\\\\[nrt]/g"
   ],
   "ignoreWords": [],
   "import": [],

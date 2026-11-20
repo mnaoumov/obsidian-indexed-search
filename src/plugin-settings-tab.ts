@@ -20,6 +20,15 @@ export class PluginSettingsTab extends PluginSettingsTabBase<PluginSettings> {
             this.bind({ propertyName: 'shouldNarrowSearch', valueComponent: toggle });
           });
         }
+      }),
+      this.settingEx({
+        desc: 'Excalidraw notes keep their drawing as JSON, compressed by default, in a block under their Drawing heading. Core Search matches that block too, so a short word finds drawings that only hold it by chance. Turn this on to search Excalidraw notes as if that block were blank; their text elements are still found.',
+        name: 'Ignore Excalidraw drawing data',
+        render: (setting) => {
+          setting.addToggle((toggle) => {
+            this.bind({ propertyName: 'shouldIgnoreExcalidrawDrawings', valueComponent: toggle });
+          });
+        }
       })
     ];
   }

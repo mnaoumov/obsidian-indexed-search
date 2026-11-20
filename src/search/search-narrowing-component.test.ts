@@ -146,12 +146,14 @@ describe('SearchNarrowingComponent', () => {
   let contentCandidates: (query: TrigramQuery) => Promise<null | Set<string>>;
   let expression: CandidateExpression;
   let isEnabled: boolean;
+  let shouldIgnoreExcalidrawDrawings: boolean;
   let notVouched: Set<string>;
   let view: FakeSearchView;
 
   beforeEach(() => {
     app = App.createConfigured__();
     isEnabled = true;
+    shouldIgnoreExcalidrawDrawings = false;
     notVouched = new Set();
     expression = { kind: 'term', query: literalQuery('quillwort'), scope: 'content' };
     vi.mocked(translateMatcher).mockImplementation(() => expression);
@@ -166,6 +168,7 @@ describe('SearchNarrowingComponent', () => {
     component = new SearchNarrowingComponent({
       app: app.asOriginalType__(),
       isEnabled: (): boolean => isEnabled,
+      shouldIgnoreExcalidrawDrawings: (): boolean => shouldIgnoreExcalidrawDrawings,
       trigramIndexComponent
     });
     view = new FakeSearchView(app.asOriginalType__().vault);
@@ -407,6 +410,39 @@ describe('SearchNarrowingComponent', () => {
       };
 
       expect(paths(search().items.queue)).toEqual(['a.md', 'b.md', 'c.md', 'd.txt']);
+    });
+
+    it('matches Excalidraw notes with their drawing data blanked, and keeps them out of the narrowing', async () => {
+      await loadPatched();
+      shouldIgnoreExcalidrawDrawings = true;
+      vi.spyOn(app.metadataCache, 'getFileCache').mockImplementation((f) => castTo<CachedMetadata>(f.path === 'a.md' ? { frontmatter: { 'excalidraw-plugin': 'parsed' } } : {}));
+      const match = vi.fn((_file: TFile, content: string) => content.includes('cat') ? {} : null);
+      view.nextQuery = castTo<ObsidianSearchQuery>({ match, matcher: {}, query: 'cat' });
+      contentCandidates = async (): Promise<Set<string>> => {
+        await noopAsync();
+        return new Set(['c.md']);
+      };
+
+      view.startSearch();
+      const queue = castTo<FakeItemQueue>(view.queue.queue);
+      await waitForRelease(queue);
+
+      // The index cannot rule the drawing out: blanking can add trigrams its indexed text lacks.
+      expect(queue.added.map((files) => paths(files))).toEqual([['a.md', 'c.md', 'd.txt']]);
+      const drawing = '---\nexcalidraw-plugin: parsed\n---\n## Drawing\n```compressed-json\n+cat+\n```\n';
+      expect(castTo<ObsidianSearchQuery>(view.searchQuery).match(file('a.md'), drawing)).toBeNull();
+      expect(match).toHaveBeenCalledWith(file('a.md'), drawing.replace('+cat+', ' '.repeat(5)));
+    });
+
+    it('leaves the compiled query alone while drawing data is not ignored', async () => {
+      await loadPatched();
+      const match = vi.fn(() => null);
+      const searchQuery = castTo<ObsidianSearchQuery>({ match, matcher: {}, query: 'cat' });
+      view.nextQuery = searchQuery;
+
+      view.startSearch();
+
+      expect(searchQuery.match).toBe(match);
     });
 
     it('restores an own start property of the queue component after the call', async () => {

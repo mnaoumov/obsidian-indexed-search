@@ -16,6 +16,7 @@ import {
 } from './api/indexed-search-api.ts';
 import { PluginSettingsComponent } from './plugin-settings-component.ts';
 import { PluginSettingsTab } from './plugin-settings-tab.ts';
+import { ignoreExcalidrawDrawings } from './search/excalidraw-drawing.ts';
 import { SearchNarrowingComponent } from './search/search-narrowing-component.ts';
 import { TrigramIndexComponent } from './trigram-index/trigram-index-component.ts';
 
@@ -72,17 +73,21 @@ export class Plugin extends PluginBase {
       })
     );
 
+    function shouldIgnoreExcalidrawDrawings(): boolean {
+      return pluginSettingsComponent.settings.shouldIgnoreExcalidrawDrawings;
+    }
     const searchNarrowingComponent = this.addChild(
       new SearchNarrowingComponent({
         app: this.app,
         isEnabled: (): boolean => pluginSettingsComponent.settings.shouldNarrowSearch,
+        shouldIgnoreExcalidrawDrawings,
         trigramIndexComponent: this.trigramIndexComponentValue
       })
     );
 
     this.indexedSearchApi = new IndexedSearchApiImpl({
       app: this.app,
-      createQuery: this.createSearchQuery.bind(this),
+      createQuery: (query, isCaseSensitive): ObsidianSearchQuery => this.createSearchQuery(query, isCaseSensitive, shouldIgnoreExcalidrawDrawings()),
       selectFiles: searchNarrowingComponent.selectCandidateFiles.bind(searchNarrowingComponent)
     });
 
@@ -121,10 +126,15 @@ export class Plugin extends PluginBase {
    *
    * @param query - The raw query.
    * @param isCaseSensitive - Whether the query matches case-sensitively.
+   * @param shouldIgnoreExcalidrawDrawings - Whether the query matches `Excalidraw` notes with their drawing data blanked.
    * @returns The compiled query.
    */
-  private createSearchQuery(query: string, isCaseSensitive: boolean): ObsidianSearchQuery {
+  private createSearchQuery(query: string, isCaseSensitive: boolean, shouldIgnoreExcalidrawDrawings: boolean): ObsidianSearchQuery {
     this.searchQueryConstructor ??= getObsidianSearchQueryConstructor(this.app);
-    return new this.searchQueryConstructor(this.app, query, isCaseSensitive);
+    const searchQuery = new this.searchQueryConstructor(this.app, query, isCaseSensitive);
+    if (shouldIgnoreExcalidrawDrawings) {
+      ignoreExcalidrawDrawings(searchQuery);
+    }
+    return searchQuery;
   }
 }
