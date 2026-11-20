@@ -14,7 +14,9 @@ export const configs: Linter.Config[] = defineEslintConfigs({
         // `dist` and `node_modules`. These four it cannot: the three extensions are not TypeScript and so
         // Are governed by no config object of its own, and `demo-vault/` is COMMITTED, so it is in no
         // Ignore file. The demo scripts show unusual module and `require` styles on purpose; a linter that
-        // "fixes" them breaks the lesson.
+        // "fixes" them breaks the lesson. The shared config re-includes the vault's own setup code,
+        // `demo-vault/_assets/CodeScriptToolkit/*.ts`, past this ignore; its `tsconfig.json` there lets typed lint
+        // And `build:compile` check it.
         '**/*.cjs',
         '**/*.js',
         '**/*.mjs',
@@ -73,6 +75,15 @@ export const configs: Linter.Config[] = defineEslintConfigs({
         ],
         rules: {
           'import-x/no-default-export': 'off'
+        }
+      },
+      {
+        files: ['src/**/*.integration.test.ts'],
+        rules: {
+          // An integration suite's `evalInObsidian` closures run inside the Obsidian renderer, where `window`
+          // Always exists. The rule reads the file's Node test environment, which declares no `window`, so it
+          // Reports every `window.x?.` in those closures although none of them can throw.
+          'unicorn/no-optional-chaining-on-undeclared-variable': 'off'
         }
       },
       {
