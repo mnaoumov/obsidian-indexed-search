@@ -239,4 +239,4 @@ Issue #1 asked for it, decided 2026-11-20. An `Excalidraw` note keeps its scene 
 
 ### Shared code
 
-Obsidian's word class and the performance-vault generator come from `@mnaoumov/obsidian-lib` and `@mnaoumov/obsidian-dev-toolkit`, never copied; the device-local store is `obsidian-lib`'s `LocalDataStore`. The file-change pipeline and the case folding are this plugin's own, for the reasons in "The index as built".
+Obsidian's word class and the performance-vault generator come from `@mnaoumov/obsidian-lib` and `@mnaoumov/obsidian-dev-toolkit`, never copied; the device-local store is `obsidian-lib`'s `LocalDataStore`. The brute-scan prototype's workers are an `obsidian-lib` `WorkerPoolComponent`, each worker loaded with its own share by index, and its worker entry exposes its handlers with `exposeWorkerApi`. A renderer bundle (`scripts/helpers/renderer-bundle.ts`) reads `obsidian` from the module the harness hands `evalInObsidian` callbacks, because a script's own `require` does not know it. The file-change pipeline and the case folding are this plugin's own, for the reasons in "The index as built".
