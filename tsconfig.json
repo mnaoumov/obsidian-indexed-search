@@ -30,5 +30,10 @@
     "./scripts/**/*.ts",
     "./src/**/*.ts",
     "./src/**/*.tsx"
+  ],
+  "references": [
+    {
+      "path": "./demo-vault/_assets/CodeScriptToolkit"
+    }
   ]
 }
