@@ -45,6 +45,10 @@ import {
   prefetchContentCandidates
 } from './candidate-evaluator.ts';
 import { translateMatcher } from './candidate-expression.ts';
+import {
+  canBeExcalidrawNote,
+  ignoreExcalidrawDrawings
+} from './excalidraw-drawing.ts';
 
 /**
  * How long a held batch waits for the index before it goes back to core whole.
@@ -63,6 +67,10 @@ export interface SearchNarrowingComponentConstructorParams {
    * Whether narrowing is on; read on every search, so a change applies to the next one.
    */
   readonly isEnabled: () => boolean;
+  /**
+   * Whether searches match `Excalidraw` notes with their drawing data blanked; read on every search.
+   */
+  readonly shouldIgnoreExcalidrawDrawings: () => boolean;
   /**
    * The vault's trigram index.
    */
@@ -124,6 +132,7 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
   private readonly isEnabled: () => boolean;
   private isPatched = false;
   private readonly log = getDebugger('indexed-search:SearchNarrowing');
+  private readonly shouldIgnoreExcalidrawDrawings: () => boolean;
   private readonly trigramIndexComponent: TrigramIndexComponent;
 
   /**
@@ -134,6 +143,7 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
   public constructor(params: SearchNarrowingComponentConstructorParams) {
     super(params.app);
     this.isEnabled = params.isEnabled;
+    this.shouldIgnoreExcalidrawDrawings = params.shouldIgnoreExcalidrawDrawings;
     this.trigramIndexComponent = params.trigramIndexComponent;
   }
 
@@ -195,7 +205,7 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
    */
   public async selectCandidateFiles(searchQuery: ObsidianSearchQuery, files: readonly TFile[]): Promise<TFile[]> {
     const prepared = this.prepare(searchQuery);
-    const universe = prepared ? files.filter((file) => this.trigramIndexComponent.isVouched(file)) : [];
+    const universe = prepared ? files.filter((file) => this.isNarrowable(file)) : [];
     const excluded = prepared && universe.length > 0 ? await this.findExcluded(prepared, universe) : null;
     return excluded ? files.filter((file) => !excluded.has(file) || !this.trigramIndexComponent.isVouched(file)) : [...files];
   }
@@ -215,7 +225,7 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
   public startHeld(prepared: PreparedSearch, start: () => ItemQueue<TFile>): [ItemQueue<TFile>, HeldBatch | null] {
     const vault = this.app.vault;
     const files = vault.getFiles();
-    const universe = files.filter((file) => this.trigramIndexComponent.isVouched(file));
+    const universe = files.filter((file) => this.isNarrowable(file));
     if (universe.length === 0) {
       return [start(), null];
     }
@@ -261,6 +271,18 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
     batch.queue.addList(kept);
   }
 
+  /**
+   * Tells whether the index may rule a file out. It indexes a note's text as written, so while drawing data is
+   * ignored, an `Excalidraw` note stays in: blanking its drawing can give the masked text trigrams of spaces and line
+   * breaks the indexed text lacks.
+   *
+   * @param file - The file.
+   * @returns Whether the file belongs to the narrowing universe.
+   */
+  private isNarrowable(file: TFile): boolean {
+    return this.trigramIndexComponent.isVouched(file) && !(this.shouldIgnoreExcalidrawDrawings() && canBeExcalidrawNote(this.app, file));
+  }
+
   private patchSearchView(): void {
     if (this.isPatched) {
       return;
@@ -283,6 +305,10 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
         withTemporaryProperty(component, 'start', (options): ItemQueue<TFile> => {
           // Core stores the compiled query before it starts the queue, so the index reads can begin first.
           const searchQuery = originalThis.searchQuery;
+          if (!this.isUnloaded() && searchQuery && this.shouldIgnoreExcalidrawDrawings()) {
+            // Core's scan calls this query's own `match` for every file it reads.
+            ignoreExcalidrawDrawings(searchQuery);
+          }
           const prepared = !this.isUnloaded() && searchQuery ? this.prepare(searchQuery) : null;
           if (!prepared) {
             return previousStart(options);

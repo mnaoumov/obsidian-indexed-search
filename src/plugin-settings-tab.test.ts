@@ -40,10 +40,10 @@ async function createTab(): Promise<PluginSettingsTab> {
 }
 
 describe('PluginSettingsTab', () => {
-  it('declares the narrowing switch as a toggle bound to shouldNarrowSearch', async () => {
+  it('declares the narrowing and Excalidraw switches as toggles bound to their settings', async () => {
     const tab = await createTab();
     const definitions = tab.getSettingDefinitions().flatMap((definition) => 'items' in definition ? definition.items ?? [] : [definition]);
-    expect(definitions.map((definition) => 'name' in definition ? definition.name : '')).toStrictEqual(['Narrow core Search']);
+    expect(definitions.map((definition) => 'name' in definition ? definition.name : '')).toStrictEqual(['Narrow core Search', 'Ignore Excalidraw drawing data']);
 
     const bindSpy = vi.spyOn(tab, 'bind');
     for (const definition of definitions) {
@@ -51,7 +51,9 @@ describe('PluginSettingsTab', () => {
         definition.render(new SettingEx(tab.containerEl), castTo<SettingGroup>(null));
       }
     }
-    expect(bindSpy.mock.calls.map(([params]) => params.propertyName)).toStrictEqual(['shouldNarrowSearch']);
-    expect(bindSpy.mock.calls[0]?.[0].valueComponent).toBeInstanceOf(ToggleComponent);
+    expect(bindSpy.mock.calls.map(([params]) => params.propertyName)).toStrictEqual(['shouldNarrowSearch', 'shouldIgnoreExcalidrawDrawings']);
+    for (const [params] of bindSpy.mock.calls) {
+      expect(params.valueComponent).toBeInstanceOf(ToggleComponent);
+    }
   });
 });

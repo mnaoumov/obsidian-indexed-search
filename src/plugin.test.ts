@@ -96,4 +96,27 @@ describe('IndexedSearch', () => {
     ]);
     plugin.unload();
   });
+
+  it('compiles API queries that ignore Excalidraw drawing data once the setting is on', async () => {
+    const queryConstructor = vi.fn(function FakeQuery(this: object, _app: unknown, query: string) {
+      Object.assign(this, {
+        match: (_file: unknown, content: string) => content.includes(query) ? {} : null,
+        matcher: {},
+        query,
+        requiredInputs: { content: true }
+      });
+    });
+    vi.mocked(getObsidianSearchQueryConstructor).mockReturnValue(castTo(queryConstructor));
+    app.vault.createSync__('drawing.md', '---\nexcalidraw-plugin: parsed\n---\n## Drawing\n```compressed-json\n+cat+\n```\n');
+    Object.assign(app.metadataCache, { isUserIgnored: (): boolean => false });
+    const plugin = new Plugin(app.asOriginalType__(), manifest);
+    vi.spyOn(plugin, 'loadData').mockResolvedValue({ shouldIgnoreExcalidrawDrawings: true });
+    await plugin.onload();
+    const [declaration] = castTo<PluginApis>(plugin).getPluginApis();
+    const api = castTo<IndexedSearchApi>(declaration?.api);
+
+    expect(await api.search('cat')).toEqual([]);
+    expect(await api.search('compressed')).toHaveLength(1);
+    plugin.unload();
+  });
 });
