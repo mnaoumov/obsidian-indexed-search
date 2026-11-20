@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 1.1.0
+
+This release has 1 new feature, 1 fix and 3 documentation changes. 3 maintenance commits (tests, build, CI, refactoring, dependencies) are not listed.
+
+### New
+
+- Filter out data from excalidraw compressed section (#1)
+
+### Fixed
+
+- load again after an update or Hot Reload instead of failing on an already published API
+
+### Documentation
+
+- **readme:** show the Buy Me a Coffee button in the Support section
+- point the installation section at the community directory listing
+- link the changelog from the README
+
 ## 1.0.0
 
 This release has 6 new features, 2 fixes, 3 improvements and 5 documentation changes. 10 maintenance commits (tests, build, CI, refactoring, dependencies) are not listed.

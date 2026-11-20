@@ -5,7 +5,7 @@
   "fundingUrl": "https://www.buymeacoffee.com/mnaoumov",
   "id": "indexed-search",
   "isDesktopOnly": false,
-  "minAppVersion": "1.14.5",
+  "minAppVersion": "1.15.1",
   "name": "Indexed Search",
-  "version": "1.0.0"
+  "version": "1.1.0"
 }
