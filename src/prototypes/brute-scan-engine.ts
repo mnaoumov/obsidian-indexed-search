@@ -7,16 +7,16 @@
  * on-disk byte counts, and transfers each buffer to its worker, so the corpus lives once, outside the main
  * heap. A literal is a Boyer-Moore-Horspool byte search; a regex decodes each file and runs with `i`. Nothing
  * is persisted: every start rebuilds the buffers from the files.
+ *
+ * The workers are a `@mnaoumov/obsidian-lib` {@link WorkerPoolComponent}. Each one keeps its own share, so the load
+ * goes to one worker by index and every scan goes to all of them.
  */
 
 /* v8 ignore file -- Not unit tested: a benchmark prototype that scans in Web Workers of the renderer; the desktop performance suite is its test. */
 
-/* eslint-disable n/no-unsupported-features/node-builtins -- `Worker` and object URLs are Web APIs of the renderer, not Node builtins. */
+import { WorkerPoolComponent } from '@mnaoumov/obsidian-lib/components/worker-pool-component';
 
-import type {
-  ScanRequest,
-  ScanResponse
-} from './brute-scan-protocol.ts';
+import type { BruteScanWorkerApi } from './brute-scan-protocol.ts';
 import type {
   IndexedFile,
   ReadFile
@@ -89,11 +89,10 @@ const SHARE_SLACK = 1.05;
  */
 export class BruteScanEngine {
   private readonly encoder = new TextEncoder();
+  private pool: null | WorkerPoolComponent<BruteScanWorkerApi> = null;
   private readonly readBatchSize: number;
   private readonly workerCount: number;
-  private workers: Worker[] = [];
   private readonly workerSource: string;
-  private workerUrl: null | string = null;
 
   public constructor(params: BruteScanEngineConstructorParams) {
     this.readBatchSize = params.readBatchSize;
@@ -110,18 +109,22 @@ export class BruteScanEngine {
    */
   public async build(files: readonly IndexedFile[], read: ReadFile): Promise<BruteScanBuildStats> {
     this.terminate();
-    const workerUrl = URL.createObjectURL(new Blob([this.workerSource], { type: 'text/javascript' }));
-    this.workerUrl = workerUrl;
+    const shares = splitIntoShares(files, this.workerCount);
+    const pool = new WorkerPoolComponent<BruteScanWorkerApi>({
+      name: 'Indexed Search brute scan',
+      size: shares.length,
+      source: this.workerSource
+    });
+    pool.load();
+    this.pool = pool;
     let bufferBytes = 0;
-    for (const share of splitIntoShares(files, this.workerCount)) {
+    for (const [shareIndex, share] of shares.entries()) {
       const { bytes, offsets } = await this.encodeShare(share, read);
       bufferBytes += bytes.length;
       const ids = Uint32Array.from(share.files, (_file, index) => share.start + index);
-      const worker = new Worker(workerUrl);
-      this.workers.push(worker);
-      await this.request(worker, { bytes, ids, kind: 'load', offsets }, [bytes.buffer, offsets.buffer, ids.buffer]);
+      await pool.getWorker(shareIndex).call('load', [{ bytes, ids, offsets }], { transfer: [bytes.buffer, offsets.buffer, ids.buffer] });
     }
-    return { bufferBytes, workerCount: this.workers.length };
+    return { bufferBytes, workerCount: pool.size };
   }
 
   /**
@@ -131,10 +134,13 @@ export class BruteScanEngine {
    * @returns The candidate ids, ascending.
    */
   public async candidates(term: BruteScanTerm): Promise<Uint32Array> {
-    const request: ScanRequest = term.kind === 'literal'
-      ? { kind: 'literal', pattern: this.encoder.encode(foldText(term.text)) }
-      : { kind: 'regex', source: term.source };
-    const answers = await Promise.all(this.workers.map(async (worker) => this.request(worker, request, [])));
+    const pool = this.pool;
+    if (!pool) {
+      throw new Error('The brute scan is not built');
+    }
+    const answers = term.kind === 'literal'
+      ? await pool.callAll('findLiteral', [this.encoder.encode(foldText(term.text))])
+      : await pool.callAll('findRegex', [term.source]);
     let result: Uint32Array = new Uint32Array(0);
     for (const answer of answers) {
       result = unite(result, answer);
@@ -146,16 +152,8 @@ export class BruteScanEngine {
    * Stops the workers, releasing the corpus.
    */
   public terminate(): void {
-    for (const worker of this.workers) {
-      worker.terminate();
-    }
-    this.workers = [];
-    if (!this.workerUrl) {
-      return;
-    }
-
-    URL.revokeObjectURL(this.workerUrl);
-    this.workerUrl = null;
+    this.pool?.unload();
+    this.pool = null;
   }
 
   private async encodeShare(share: Share, read: ReadFile): Promise<EncodedShare> {
@@ -180,30 +178,6 @@ export class BruteScanEngine {
     }
     offsets[share.files.length] = position;
     return { bytes: bytes.slice(0, position), offsets };
-  }
-
-  private async request(worker: Worker, request: ScanRequest, transfer: Transferable[]): Promise<Uint32Array> {
-    return new Promise((resolve, reject) => {
-      function onMessage(messageEvent: MessageEvent<ScanResponse>): void {
-        cleanUp();
-        if (messageEvent.data.error) {
-          reject(new Error(messageEvent.data.error));
-          return;
-        }
-        resolve(messageEvent.data.ids);
-      }
-      function onError(errorEvent: ErrorEvent): void {
-        cleanUp();
-        reject(new Error(errorEvent.message));
-      }
-      function cleanUp(): void {
-        worker.removeEventListener('message', onMessage);
-        worker.removeEventListener('error', onError);
-      }
-      worker.addEventListener('message', onMessage);
-      worker.addEventListener('error', onError);
-      worker.postMessage(request, transfer);
-    });
   }
 }
 
@@ -235,5 +209,3 @@ function splitIntoShares(files: readonly IndexedFile[], shareCount: number): Sha
   }
   return shares;
 }
-
-/* eslint-enable n/no-unsupported-features/node-builtins -- End of the file-wide Web API section. */

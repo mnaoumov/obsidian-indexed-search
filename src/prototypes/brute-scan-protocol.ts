@@ -1,21 +1,13 @@
 /**
  * @file
  *
- * Messages between the brute-scan engine and its workers.
+ * The API the brute-scan workers expose to the engine, through `@mnaoumov/obsidian-lib`'s worker protocol.
  */
 
 /**
- * Finds the files whose folded text contains a folded UTF-8 literal.
+ * One worker's share of the corpus. The buffers are transferred, so the main thread keeps none of them.
  */
-export interface LiteralRequest {
-  readonly kind: 'literal';
-  readonly pattern: Uint8Array;
-}
-
-/**
- * Hands a worker its share of the corpus. The buffers are transferred, so the main thread keeps none of them.
- */
-export interface LoadRequest {
+export interface BruteScanShare {
   /**
    * Folded UTF-8 text of every file of the share, back to back.
    */
@@ -24,7 +16,6 @@ export interface LoadRequest {
    * The global id of each file of the share.
    */
   readonly ids: Uint32Array;
-  readonly kind: 'load';
   /**
    * Where each file starts in `bytes`, plus one final entry for the end.
    */
@@ -32,22 +23,19 @@ export interface LoadRequest {
 }
 
 /**
- * Finds the files a regex matches with `i`, over folded text.
+ * What each brute-scan worker exposes. Both finders answer the global ids of the share's matching files, ascending.
  */
-export interface RegexRequest {
-  readonly kind: 'regex';
-  readonly source: string;
-}
-
-/**
- * Any request to a worker.
- */
-export type ScanRequest = LiteralRequest | LoadRequest | RegexRequest;
-
-/**
- * A worker's answer: the ids of its matching files, ascending, or an empty array for `load`.
- */
-export interface ScanResponse {
-  readonly error?: string;
-  readonly ids: Uint32Array;
+export interface BruteScanWorkerApi {
+  /**
+   * Finds the files whose folded text contains a folded UTF-8 literal.
+   */
+  readonly findLiteral: (pattern: Uint8Array) => Uint32Array;
+  /**
+   * Finds the files a regex matches with `i`, over folded text.
+   */
+  readonly findRegex: (source: string) => Uint32Array;
+  /**
+   * Hands the worker its share of the corpus.
+   */
+  readonly load: (share: BruteScanShare) => void;
 }
