@@ -13,6 +13,8 @@ import {
   andQuery,
   canTextSatisfy,
   collectTrigrams,
+  createPathChecker,
+  createTextChecker,
   formatQuery,
   literalQuery,
   orQuery,
@@ -37,6 +39,41 @@ describe('canTextSatisfy', () => {
     expect(canTextSatisfy(regexQuery('foo(bar|baz)'), 'a foobax b')).toBe(false);
     expect(canTextSatisfy({ kind: 'all' }, '')).toBe(true);
     expect(canTextSatisfy({ kind: 'none' }, 'anything')).toBe(false);
+  });
+});
+
+describe('createPathChecker', () => {
+  it('agrees with a check of the whole path on every path, including trigrams across the last slash', () => {
+    const queries = [
+      literalQuery('quill'),
+      literalQuery('ts/qu'),
+      literalQuery('s/q'),
+      literalQuery('Plants'),
+      literalQuery('ab'),
+      orQuery([literalQuery('wort/x'), literalQuery('quilt')]),
+      andQuery([literalQuery('plan'), literalQuery('wort')])
+    ];
+    const paths = [
+      'plants/QUILLWORT.md',
+      'plants/quilt.md',
+      'plants/sub/quillwort.md',
+      'quillwort.md',
+      'a/b',
+      'ts/q',
+      's/quill',
+      'plants/quillwort/x.md',
+      'plants/quillwort/y.md',
+      '/quill',
+      'plants/'
+    ];
+    for (const query of queries) {
+      const checkPath = createPathChecker(query);
+      const checkText = createTextChecker(query);
+      // Twice over, so the second pass reads every folder from the checker's memory.
+      for (const path of [...paths, ...paths]) {
+        expect(checkPath(path), `${formatQuery(query)} on ${path}`).toBe(checkText(path));
+      }
+    }
   });
 });
 

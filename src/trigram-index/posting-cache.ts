@@ -5,7 +5,7 @@
  *
  * Typing a query in core Search starts a search on every keystroke, and each new prefix shares all but one of its
  * trigrams with the one before. Reading those again from IndexedDB costs a round trip of 40 ms or more each, and
- * far more on a busy machine (0.4 to 2.2 s on the 41,880-note F:\Obsidian clone, 2026-11-20), so the lists a search
+ * far more on a busy machine (0.4 to 2.2 s on a copy of a 40,000-note real vault, 2026-11-20), so the lists a search
  * read are kept for the next one.
  */
 
