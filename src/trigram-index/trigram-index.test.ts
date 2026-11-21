@@ -1,5 +1,8 @@
 import { LocalDataStore } from '@mnaoumov/obsidian-lib/data-stores/local-data-store';
-import { noopAsync } from '@mnaoumov/typescript-lib/function';
+import {
+  noop,
+  noopAsync
+} from '@mnaoumov/typescript-lib/function';
 import { IDBFactory } from 'fake-indexeddb';
 import {
   describe,
@@ -190,6 +193,52 @@ describe('TrigramIndex', () => {
     await index.update(stat ? [stat] : [], vault.read);
     expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['e.md']);
     expect(await candidatePaths(index, vault, 'plants')).toEqual(['a.md']);
+  });
+
+  it('answers a repeated term from memory until a write changes the postings', async () => {
+    const vault = sampleVault();
+    const { index, postingsStore } = await openHarness(new IDBFactory());
+    await index.sync(vault.list(), vault.read);
+    const get = vi.spyOn(postingsStore, 'get');
+
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['a.md', 'e.md']);
+    const firstReads = get.mock.calls.length;
+    expect(firstReads).toBeGreaterThan(0);
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['a.md', 'e.md']);
+    expect(get.mock.calls.length).toBe(firstReads);
+
+    vault.write('b.md', 'a quillwort here too');
+    const stat = vault.stat('b.md');
+    await index.update(stat ? [stat] : [], vault.read);
+    const readsBefore = get.mock.calls.length;
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['a.md', 'b.md', 'e.md']);
+    expect(get.mock.calls.length).toBeGreaterThan(readsBefore);
+  });
+
+  it('does not keep a list whose reads overlapped a write', async () => {
+    const vault = sampleVault();
+    const { index, postingsStore } = await openHarness(new IDBFactory());
+    await index.sync(vault.list(), vault.read);
+    const originalGet = postingsStore.get.bind(postingsStore);
+    const gate = { open: noop };
+    const opened = new Promise<void>((resolve) => {
+      gate.open = resolve;
+    });
+    // The query's first read waits until the update's postings commit has landed.
+    const get = vi.spyOn(postingsStore, 'get').mockImplementationOnce(async (key) => {
+      await opened;
+      return originalGet(key);
+    });
+    const pending = index.candidates(literalQuery('quillwort'));
+
+    vault.write('b.md', 'a quillwort here too');
+    const stat = vault.stat('b.md');
+    await index.update(stat ? [stat] : [], vault.read);
+    gate.open();
+    expect(await pending).not.toBeNull();
+    const readsBefore = get.mock.calls.length;
+    expect(await candidatePaths(index, vault, 'quillwort')).toEqual(['a.md', 'b.md', 'e.md']);
+    expect(get.mock.calls.length).toBeGreaterThan(readsBefore);
   });
 
   it('moves a renamed file without reading it', async () => {

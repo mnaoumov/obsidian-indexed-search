@@ -26,6 +26,7 @@ import { ensureNonNullable } from '@mnaoumov/typescript-lib/type-guards';
 import type { SegmentPostingRun } from './segment-postings.ts';
 import type { TrigramQuery } from './trigram-query.ts';
 
+import { PostingCache } from './posting-cache.ts';
 import {
   decodeCheckedPostings,
   encodePostings,
@@ -102,6 +103,12 @@ export interface TrigramIndexConstructorParams {
    */
   readonly minCommonFiles?: number;
   /**
+   * How many file ids the decoded posting lists kept in memory between searches hold at most; 4 bytes each.
+   *
+   * @default 2097152
+   */
+  readonly postingCacheIds?: number;
+  /**
    * The store of the posting records and each segment's trigram list.
    */
   readonly postingsStore: LocalDataStore;
@@ -167,6 +174,8 @@ const DEFAULT_COMMON_SHARE = 0.9;
 const DEFAULT_COMPACT_SHARE = 0.25;
 const DEFAULT_JOURNAL_LIMIT = 512;
 const DEFAULT_MIN_COMMON_FILES = 1024;
+// 8 MiB of ids: a query's lists are a few KiB to a few hundred KiB, so this keeps every list a typed query reads.
+const DEFAULT_POSTING_CACHE_IDS = 2_097_152;
 const DEFAULT_READ_CONCURRENCY = 4;
 const DEFAULT_SEGMENT_SIZE = 8192;
 const DEFAULT_WRITE_BATCH_IDS = 262_144;
@@ -197,7 +206,12 @@ export class TrigramIndex {
   private readonly minCommonFiles: number;
   private nextId = 0;
   private readonly paths = new Map<number, string>();
+  private readonly postingCache: PostingCache;
   private readonly postingsStore: LocalDataStore;
+  /**
+   * Bumped, with the posting cache cleared, after every write to the posting records.
+   */
+  private postingsVersion = 0;
   private readonly readConcurrency: number;
   private readonly segmentSize: number;
   private readonly segmentTrigrams: (Float64Array | null)[] = [];
@@ -218,6 +232,7 @@ export class TrigramIndex {
     this.log = params.log;
     this.minCommonFiles = params.minCommonFiles ?? DEFAULT_MIN_COMMON_FILES;
     this.postingsStore = params.postingsStore;
+    this.postingCache = new PostingCache({ maxIds: params.postingCacheIds ?? DEFAULT_POSTING_CACHE_IDS });
     this.readConcurrency = params.readConcurrency ?? DEFAULT_READ_CONCURRENCY;
     this.segmentSize = params.segmentSize ?? DEFAULT_SEGMENT_SIZE;
     this.writeBatchIds = params.writeBatchIds ?? DEFAULT_WRITE_BATCH_IDS;
@@ -244,14 +259,28 @@ export class TrigramIndex {
       postings.set(trigram, null);
     }
     await Promise.all(trigrams.map(async (trigram) => {
+      const cached = this.postingCache.get(trigram);
+      if (cached) {
+        postings.set(trigram, cached);
+        return;
+      }
+      const version = this.postingsVersion;
+      const damagedSegments = new Set<number>();
       const lists = await Promise.all(
-        Array.from({ length: segmentCount }, async (_, segment) => this.readPostings(trigram, segment, unknownSegments))
+        Array.from({ length: segmentCount }, async (_, segment) => this.readPostings(trigram, segment, damagedSegments))
       );
       let ids: Uint32Array = new Uint32Array(0);
       for (const list of lists) {
         ids = unite(ids, list);
       }
       postings.set(trigram, ids);
+      for (const segment of damagedSegments) {
+        unknownSegments.add(segment);
+      }
+      // A write since the reads began may have changed the list, so only a list read wholly between writes is kept.
+      if (damagedSegments.size === 0 && version === this.postingsVersion) {
+        this.postingCache.set(trigram, ids);
+      }
     }));
     let ids = evaluateQuery(query, postings);
     if (ids === null) {
@@ -329,6 +358,7 @@ export class TrigramIndex {
       this.journalPaths.clear();
       this.segmentTrigrams.length = 0;
       this.compactedDeadCounts.length = 0;
+      this.invalidatePostings();
       // One read of the whole store: the metadata, one packed record per segment and the journal.
       const records = await this.filesStore.entries();
       const meta = parseMeta(records.find(([key]) => key === META_KEY)?.[1]);
@@ -463,6 +493,7 @@ export class TrigramIndex {
         return [key, merged];
       }));
       await this.postingsStore.commit({ entries });
+      this.invalidatePostings();
     };
     let batch: SegmentPostingRun[] = [];
     let batchIds = 0;
@@ -519,6 +550,7 @@ export class TrigramIndex {
   private async clearStores(): Promise<void> {
     await this.filesStore.clear();
     await this.postingsStore.clear();
+    this.invalidatePostings();
     this.commonTrigrams = new Set();
     this.dirtySegments.clear();
     this.journalPaths.clear();
@@ -553,6 +585,8 @@ export class TrigramIndex {
     for (let start = 0; start < keys.length; start += this.writeBatchSize) {
       await store.commit({ entries: [], removedKeys: keys.slice(start, start + this.writeBatchSize) });
     }
+    // Only the posting records need it, and clearing the cache after a files-store removal costs one re-read.
+    this.invalidatePostings();
   }
 
   private async enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -695,6 +729,15 @@ export class TrigramIndex {
     }
   }
 
+  /**
+   * Drops every cached posting list, and makes any read that began before this call skip the cache: called after
+   * each write to the posting records, before the file records that rely on it are saved.
+   */
+  private invalidatePostings(): void {
+    this.postingsVersion++;
+    this.postingCache.clear();
+  }
+
   private isMostlyDead(segment: number): boolean {
     const segmentBase = segment * this.segmentSize;
     const allocated = Math.min(this.nextId, segmentBase + this.segmentSize) - segmentBase;
@@ -803,6 +846,7 @@ export class TrigramIndex {
     this.segmentTrigrams[segment] = null;
     // Deleting the list persists the mark: a restart sees a segment with no list and treats it the same way.
     await this.postingsStore.delete(toSegmentKey(segment));
+    this.invalidatePostings();
   }
 
   private async readPostings(trigram: number, segment: number, unknownSegments: Set<number>): Promise<Uint32Array> {
@@ -885,6 +929,7 @@ export class TrigramIndex {
       entries = [];
     }
     await this.postingsStore.commit({ entries });
+    this.invalidatePostings();
     if (oldTrigrams) {
       const removedKeys = [...oldTrigrams].filter((trigram) => !hasTrigram(newTrigrams, trigram)).map((trigram) => toPostingKey(trigram, segment));
       await this.commitRemovals(this.postingsStore, removedKeys);

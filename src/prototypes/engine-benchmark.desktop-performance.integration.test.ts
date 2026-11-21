@@ -15,6 +15,7 @@ import {
 import type { BenchmarkApi } from './benchmark-entry.ts';
 import type { BruteScanTerm } from './brute-scan-engine.ts';
 
+import { PERFORMANCE_FILE_COUNT } from '../../scripts/helpers/performance-vault-shape.ts';
 import {
   bundleForRenderer,
   loadRendererBundle
@@ -57,7 +58,6 @@ interface EngineQueryRun {
   readonly missingFromCandidates: string[];
 }
 
-const FILE_COUNT = 37_000;
 const PLUGIN_ID = 'indexed-search';
 const SCAN_TIMEOUT_IN_MILLISECONDS = 900_000;
 const CORE_RUNS = 3;
@@ -86,7 +86,7 @@ const QUERIES: readonly BenchmarkQuery[] = [
 ];
 
 const results = new Map<string, unknown>([
-  ['fileCount', FILE_COUNT],
+  ['fileCount', PERFORMANCE_FILE_COUNT],
   ['trigramSegmentSize', TRIGRAM_SEGMENT_SIZE],
   ['workerCount', WORKER_COUNT]
 ]);
@@ -99,7 +99,7 @@ describe('engine benchmark on the 37,000-note corpus', () => {
     vaultPath = getTemporaryVault().path;
     await waitForPerformanceVaultScan({
       cachePath: 'links/link-0.md',
-      expectedFileCount: FILE_COUNT,
+      expectedFileCount: PERFORMANCE_FILE_COUNT,
       timeoutInMilliseconds: SCAN_TIMEOUT_IN_MILLISECONDS,
       vaultPath
     });

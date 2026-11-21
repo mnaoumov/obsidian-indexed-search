@@ -9,7 +9,7 @@ import { noop } from '@mnaoumov/typescript-lib/function';
 import type { TrigramQuery } from '../trigram-index/trigram-query.ts';
 import type { CandidateExpression } from './candidate-expression.ts';
 
-import { createTextChecker } from '../trigram-index/trigram-query.ts';
+import { createPathChecker } from '../trigram-index/trigram-query.ts';
 
 /**
  * What the evaluator reads about the files.
@@ -95,7 +95,7 @@ export async function evaluateCandidates<File>(
       if (!contentPaths) {
         return null;
       }
-      const canPathSatisfy = expression.scope === 'content' ? null : createTextChecker(expression.query);
+      const canPathSatisfy = expression.scope === 'content' ? null : createPathChecker(expression.query);
       return new Set(files.filter((file) => {
         const path = source.getPath(file);
         return contentPaths.has(path) || (canPathSatisfy?.(path) ?? false);

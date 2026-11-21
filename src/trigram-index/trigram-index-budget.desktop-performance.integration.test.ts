@@ -24,6 +24,10 @@ import {
 
 import type { TrigramIndexComponent } from './trigram-index-component.ts';
 
+import {
+  PERFORMANCE_FILE_COUNT,
+  PERFORMANCE_NOTE_COUNT
+} from '../../scripts/helpers/performance-vault-shape.ts';
 import { loadRendererBundle } from '../../scripts/helpers/renderer-bundle.ts';
 import { literalQuery } from './trigram-query.ts';
 
@@ -32,7 +36,6 @@ interface IndexPlugin {
 }
 
 const BYTES_PER_MEGABYTE = 1024 * 1024;
-const FILE_COUNT = 37_000;
 const PEAK_BUDGET_IN_BYTES = 256 * BYTES_PER_MEGABYTE;
 const DISK_BUDGET_IN_BYTES = 220 * BYTES_PER_MEGABYTE;
 const MILLISECONDS_PER_SECOND = 1000;
@@ -51,7 +54,7 @@ describe('the trigram index on the 37,000-note corpus', () => {
     vaultPath = getTemporaryVault().path;
     await waitForPerformanceVaultScan({
       cachePath: 'links/link-0.md',
-      expectedFileCount: FILE_COUNT,
+      expectedFileCount: PERFORMANCE_FILE_COUNT,
       timeoutInMilliseconds: SCAN_TIMEOUT_IN_MILLISECONDS,
       vaultPath
     });
@@ -183,9 +186,9 @@ describe('the trigram index on the 37,000-note corpus', () => {
     });
     Object.assign(results, measured);
 
-    expect(measured.indexedFileCount).toBe(FILE_COUNT);
+    expect(measured.indexedFileCount).toBe(PERFORMANCE_NOTE_COUNT);
     expect(measured.missing).toEqual([]);
-    expect(measured.candidateCount).toBeLessThan(FILE_COUNT / 10);
+    expect(measured.candidateCount).toBeLessThan(PERFORMANCE_NOTE_COUNT / 10);
     expect(measured.restartReads).toBe(0);
     expect(measured.restartInMilliseconds).toBeLessThanOrEqual(RESTART_BUDGET_IN_MILLISECONDS);
     expect(measured.after.heapUsed - measured.before.heapUsed).toBeLessThanOrEqual(STEADY_BUDGET_IN_BYTES);
