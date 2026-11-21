@@ -42,6 +42,14 @@ describe('canTextSatisfy', () => {
   });
 });
 
+describe('createTextChecker', () => {
+  it('does not take a trigram that only shares a mask slot with a wanted one', () => {
+    // U+0080 and @ (U+0040) both shift out of the 16-bit slot, so `\u0080ab` lands in the slot of `@ab`.
+    expect(createTextChecker(literalQuery('@ab'))('\u{80}ab')).toBe(false);
+    expect(createTextChecker(literalQuery('@ab'))('x@ab')).toBe(true);
+  });
+});
+
 describe('createPathChecker', () => {
   it('agrees with a check of the whole path on every path, including trigrams across the last slash', () => {
     const queries = [

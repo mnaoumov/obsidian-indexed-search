@@ -585,9 +585,8 @@ export class TrigramIndex {
     for (let start = 0; start < keys.length; start += this.writeBatchSize) {
       await store.commit({ entries: [], removedKeys: keys.slice(start, start + this.writeBatchSize) });
     }
-    if (store === this.postingsStore) {
-      this.invalidatePostings();
-    }
+    // Only the posting records need it, and clearing the cache after a files-store removal costs one re-read.
+    this.invalidatePostings();
   }
 
   private async enqueue<T>(operation: () => Promise<T>): Promise<T> {
