@@ -10,6 +10,16 @@ import {
 } from './case-folding.ts';
 
 const CODE_UNIT_COUNT = 0x1_00_00;
+const REGEX_CHUNK_SIZE = 256;
+const SURROGATE_START = 0xD8_00;
+const SURROGATE_END = 0xDF_FF;
+
+function doesIFlagMatchFold(codeUnits: readonly number[], table: Uint16Array): boolean {
+  const source = codeUnits.map((codeUnit) => String.raw`\u${codeUnit.toString(16).padStart(4, '0')}`).join('');
+  // eslint-disable-next-line unicorn/prefer-code-point -- the fold maps UTF-16 code units, which is what i compares.
+  const folded = String.fromCharCode(...codeUnits.map((codeUnit) => table[codeUnit] ?? 0));
+  return new RegExp(`^${source}$`, 'i').test(folded);
+}
 
 describe('foldText', () => {
   it('folds every pair of code units the i flag equates to one form', () => {
@@ -32,13 +42,18 @@ describe('foldText', () => {
       if (table[folded] !== folded) {
         mismatches.push(codeUnit);
       }
-      if (codeUnit >= 0xD8_00 && codeUnit <= 0xDF_FF) {
-        continue;
+    }
+    // One regex per chunk of code units, not one per code unit: 63,488 regexes took 1.8 s idle, 7.5 s loaded.
+    // A chunk that fails is checked unit by unit, so the mismatches are still named.
+    for (let chunkStart = 0; chunkStart < CODE_UNIT_COUNT; chunkStart += REGEX_CHUNK_SIZE) {
+      const codeUnits: number[] = [];
+      for (let codeUnit = chunkStart; codeUnit < chunkStart + REGEX_CHUNK_SIZE; codeUnit++) {
+        if (codeUnit < SURROGATE_START || codeUnit > SURROGATE_END) {
+          codeUnits.push(codeUnit);
+        }
       }
-      const pattern = new RegExp(String.raw`^\u${codeUnit.toString(16).padStart(4, '0')}$`, 'i');
-      // eslint-disable-next-line unicorn/prefer-code-point -- the fold maps UTF-16 code units, which is what i compares.
-      if (!pattern.test(String.fromCharCode(folded))) {
-        mismatches.push(codeUnit);
+      if (codeUnits.length > 0 && !doesIFlagMatchFold(codeUnits, table)) {
+        mismatches.push(...codeUnits.filter((codeUnit) => !doesIFlagMatchFold([codeUnit], table)));
       }
     }
     expect(mismatches).toEqual([]);
