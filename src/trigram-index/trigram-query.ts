@@ -83,6 +83,9 @@ interface RegexFeatures {
 
 const TRIGRAM_LENGTH = 3;
 const CODE_UNIT_RADIX = 0x1_00_00;
+const TRIGRAM_HASH_SIZE = 0x1_00_00;
+const TRIGRAM_HASH_FIRST_SHIFT = 10;
+const TRIGRAM_HASH_SECOND_SHIFT = 5;
 
 const ALL_QUERY: AllQuery = { kind: 'all' };
 const NONE_QUERY: NoneQuery = { kind: 'none' };
@@ -189,37 +192,8 @@ export function collectTrigrams(query: TrigramQuery, trigrams = new Set<number>(
  */
 export function createTextChecker(query: TrigramQuery): (text: string) => boolean {
   const wanted = collectTrigrams(query);
-  return (text) => doesTrigramSetSatisfy(query, findTrigrams(text, wanted));
-}
-
-/**
- * Returns which of the given trigrams a text contains, after folding. It runs once per file path on every
- * search, so it folds code units in place and allocates nothing per text but the result.
- *
- * @param text - The text, unfolded.
- * @param wanted - The trigrams to look for.
- * @returns The wanted trigrams the text contains.
- */
-export function findTrigrams(text: string, wanted: ReadonlySet<number>): Set<number> {
-  const found = new Set<number>();
-  if (wanted.size === 0) {
-    return found;
-  }
-  const foldTable = getFoldTable();
-  let first = 0;
-  let second = 0;
-  for (let index = 0; index < text.length; index++) {
-    const third = ensureNonNullable(foldTable[text.charCodeAt(index)]);
-    if (index >= TRIGRAM_LENGTH - 1) {
-      const trigram = packTrigram(first, second, third);
-      if (wanted.has(trigram)) {
-        found.add(trigram);
-      }
-    }
-    first = second;
-    second = third;
-  }
-  return found;
+  const mask = createTrigramMask(wanted);
+  return (text) => doesTrigramSetSatisfy(query, findTrigrams(text, wanted, mask));
 }
 
 /**
@@ -333,6 +307,23 @@ function assertNever(value: never): never {
   throw new Error(`Unexpected value: ${JSON.stringify(value)}`);
 }
 
+/**
+ * Marks the {@link hashTrigram} slot of each trigram, so a scan can skip most positions with one byte read.
+ *
+ * @param trigrams - The trigrams.
+ * @returns One byte per hash slot, 1 where some trigram hashes.
+ */
+function createTrigramMask(trigrams: ReadonlySet<number>): Uint8Array {
+  const mask = new Uint8Array(TRIGRAM_HASH_SIZE);
+  for (const trigram of trigrams) {
+    const third = trigram % CODE_UNIT_RADIX;
+    const second = Math.floor(trigram / CODE_UNIT_RADIX) % CODE_UNIT_RADIX;
+    const first = Math.floor(trigram / CODE_UNIT_RADIX / CODE_UNIT_RADIX);
+    mask[hashTrigram(first, second, third)] = 1;
+  }
+  return mask;
+}
+
 function doesTrigramSetSatisfy(query: TrigramQuery, trigrams: ReadonlySet<number>): boolean {
   switch (query.kind) {
     case 'all': {
@@ -356,6 +347,38 @@ function doesTrigramSetSatisfy(query: TrigramQuery, trigrams: ReadonlySet<number
   }
 }
 
+/**
+ * Returns which of the given trigrams a text contains, after folding. It runs once per file path on every
+ * search, so it folds code units in place and allocates nothing per text but the result.
+ *
+ * @param text - The text, unfolded.
+ * @param wanted - The trigrams to look for.
+ * @param mask - The {@link createTrigramMask} of `wanted`.
+ * @returns The wanted trigrams the text contains.
+ */
+function findTrigrams(text: string, wanted: ReadonlySet<number>, mask: Uint8Array): Set<number> {
+  const found = new Set<number>();
+  if (wanted.size === 0) {
+    return found;
+  }
+  const foldTable = getFoldTable();
+  let first = 0;
+  let second = 0;
+  for (let index = 0; index < text.length; index++) {
+    const third = ensureNonNullable(foldTable[text.charCodeAt(index)]);
+    // Most positions fail the one-byte mask read, so the packing and the set lookup run only for likely hits.
+    if (index >= TRIGRAM_LENGTH - 1 && mask[hashTrigram(first, second, third)] === 1) {
+      const trigram = packTrigram(first, second, third);
+      if (wanted.has(trigram)) {
+        found.add(trigram);
+      }
+    }
+    first = second;
+    second = third;
+  }
+  return found;
+}
+
 function foldedLiteralQuery(folded: string): TrigramQuery {
   if (folded.length < TRIGRAM_LENGTH) {
     return ALL_QUERY;
@@ -368,6 +391,19 @@ function foldedLiteralQuery(folded: string): TrigramQuery {
     });
   }
   return andQuery(trigrams);
+}
+
+/**
+ * Hashes three folded code units into a {@link TRIGRAM_HASH_SIZE} slot, with small-integer arithmetic only.
+ *
+ * @param first - The first code unit.
+ * @param second - The second code unit.
+ * @param third - The third code unit.
+ * @returns The slot.
+ */
+function hashTrigram(first: number, second: number, third: number): number {
+  // eslint-disable-next-line no-bitwise -- A hash: the shifts and the mask are the point.
+  return ((first << TRIGRAM_HASH_FIRST_SHIFT) ^ (second << TRIGRAM_HASH_SECOND_SHIFT) ^ third) & (TRIGRAM_HASH_SIZE - 1);
 }
 
 function wrap(kind: 'and' | 'or', children: TrigramQuery[], empty: TrigramQuery): TrigramQuery {

@@ -56,6 +56,11 @@ import {
 const HOLD_TIMEOUT_IN_MILLISECONDS = 1000;
 
 /**
+ * The extensions whose content core Search reads; every other file it matches by name and path alone.
+ */
+const CONTENT_EXTENSIONS = new Set(['canvas', 'md']);
+
+/**
  * What the narrowing component needs.
  */
 export interface SearchNarrowingComponentConstructorParams {
@@ -196,7 +201,7 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
   }
 
   /**
-   * Returns the files a compiled query may match: every given file but the notes the index rules out. A note whose
+   * Returns the files a compiled query may match: every given file but the ones the narrowing rules out. A note whose
    * stats change while the index answers stays in, since the index answered for its earlier content.
    *
    * @param searchQuery - The compiled query.
@@ -207,7 +212,7 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
     const prepared = this.prepare(searchQuery);
     const universe = prepared ? files.filter((file) => this.isNarrowable(file)) : [];
     const excluded = prepared && universe.length > 0 ? await this.findExcluded(prepared, universe) : null;
-    return excluded ? files.filter((file) => !excluded.has(file) || !this.trigramIndexComponent.isVouched(file)) : [...files];
+    return excluded ? files.filter((file) => !excluded.has(file) || !this.isNarrowable(file)) : [...files];
   }
 
   /**
@@ -272,15 +277,25 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
   }
 
   /**
-   * Tells whether the index may rule a file out. It indexes a note's text as written, so while drawing data is
-   * ignored, an `Excalidraw` note stays in: blanking its drawing can give the masked text trigrams of spaces and line
-   * breaks the indexed text lacks.
+   * Tells whether the narrowing may rule a file out.
+   *
+   * Core reads the content of Markdown and canvas files only; every other file is matched with an empty content, so
+   * its name and path decide, and the narrowing checks those exactly as it checks a note's. A note needs the index
+   * to vouch for it. The index indexes a note's text as written, so while drawing data is ignored, an `Excalidraw`
+   * note stays in: blanking its drawing can give the masked text trigrams of spaces and line breaks the indexed text
+   * lacks. A canvas always stays in, since its text is not indexed.
    *
    * @param file - The file.
    * @returns Whether the file belongs to the narrowing universe.
    */
   private isNarrowable(file: TFile): boolean {
-    return this.trigramIndexComponent.isVouched(file) && !(this.shouldIgnoreExcalidrawDrawings() && canBeExcalidrawNote(this.app, file));
+    if (!hasReadContent(file)) {
+      return true;
+    }
+    if (!this.trigramIndexComponent.isVouched(file)) {
+      return false;
+    }
+    return !(this.shouldIgnoreExcalidrawDrawings() && canBeExcalidrawNote(this.app, file));
   }
 
   private patchSearchView(): void {
@@ -335,6 +350,17 @@ function createFileSeed(): FileSeed {
     }
   });
   return seed;
+}
+
+/**
+ * Tells whether core Search reads a file's content: it does for Markdown and canvas files only (public `VL`, 1.14.5
+ * line 84515; catalyst 1.15.1 `Xb`).
+ *
+ * @param file - The file.
+ * @returns Whether core matches the file's content.
+ */
+function hasReadContent(file: TFile): boolean {
+  return CONTENT_EXTENSIONS.has(file.extension);
 }
 
 function withTemporaryProperty<Target extends object, Key extends keyof Target, Result>(

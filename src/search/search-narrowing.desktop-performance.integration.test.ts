@@ -1,8 +1,8 @@
 /**
  * @file
  *
- * On the 37,000-note, 110 MB corpus, core Search answers the same results several times faster with the plugin
- * on than with it off.
+ * On the 37,000-note, 110 MB corpus with 36,530 attachments beside it, core Search answers the same results several
+ * times faster with the plugin on than with it off, and within a time budget.
  *
  * Each query runs with the plugin disabled, so core scans every file, and then enabled with its index caught up,
  * so the plugin narrows core's queue. Each side takes the median of a few runs, timed from `startSearch` until
@@ -22,6 +22,7 @@ import {
 
 import type { TrigramIndexComponent } from '../trigram-index/trigram-index-component.ts';
 
+import { PERFORMANCE_FILE_COUNT } from '../../scripts/helpers/performance-vault-shape.ts';
 import { loadRendererBundle } from '../../scripts/helpers/renderer-bundle.ts';
 
 interface IndexPlugin {
@@ -35,8 +36,12 @@ interface SearchMeasurement {
   readonly syncMedianInMilliseconds: number;
 }
 
-const FILE_COUNT = 37_000;
 const MIN_SPEEDUP = 3;
+/**
+ * The most a narrowed query may take, from `startSearch` to its full result list: the bar is results as you type on a
+ * vault with as many files as a large real one.
+ */
+const QUERY_BUDGET_IN_MILLISECONDS = 300;
 const PLUGIN_ID = 'indexed-search';
 // The generator plants `zq<n>x` for every power of ten `n` dividing a filler note's number, so each query's match count is known.
 const QUERIES = ['zq100x', '"zq10x zq100x"', 'q1000', '/zq100?0x/', 'ZQ100X'];
@@ -52,7 +57,7 @@ describe('core Search with the plugin on the 37,000-note corpus', () => {
     vaultPath = getTemporaryVault().path;
     await waitForPerformanceVaultScan({
       cachePath: 'links/link-0.md',
-      expectedFileCount: FILE_COUNT,
+      expectedFileCount: PERFORMANCE_FILE_COUNT,
       timeoutInMilliseconds: SCAN_TIMEOUT_IN_MILLISECONDS,
       vaultPath
     });
@@ -147,5 +152,6 @@ describe('core Search with the plugin on the 37,000-note corpus', () => {
     expect(measured.plainPaths.length).toBeGreaterThan(0);
     expect(measured.narrowedPaths).toEqual(measured.plainPaths);
     expect(measured.narrowedInMilliseconds * MIN_SPEEDUP).toBeLessThan(measured.plainInMilliseconds);
+    expect(measured.narrowedInMilliseconds).toBeLessThan(QUERY_BUDGET_IN_MILLISECONDS);
   }, QUERY_TIMEOUT_IN_MILLISECONDS);
 });

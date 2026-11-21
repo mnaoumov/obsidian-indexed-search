@@ -245,9 +245,17 @@ describe('SearchNarrowingComponent', () => {
   });
 
   describe('selectCandidateFiles', () => {
-    it('drops the vouched notes the index rules out and keeps everything else, in order', async () => {
+    it('drops the vouched notes the index rules out and the other files a content term cannot match, in order', async () => {
       const files = [file('d.txt'), file('c.md'), file('b.md'), file('a.md')];
-      expect(paths(await component.selectCandidateFiles(createQuery('quillwort'), files))).toEqual(['d.txt', 'c.md', 'a.md']);
+      expect(paths(await component.selectCandidateFiles(createQuery('quillwort'), files))).toEqual(['c.md', 'a.md']);
+    });
+
+    it('keeps a file core reads no content of when its path may match, and always keeps a canvas', async () => {
+      expression = { kind: 'term', query: literalQuery('quillwort'), scope: 'contentOrPath' };
+      app.vault.createSync__('quillwort.png', '');
+      app.vault.createSync__('e.canvas', '{}');
+      const files = [file('d.txt'), file('quillwort.png'), file('e.canvas'), file('b.md'), file('a.md')];
+      expect(paths(await component.selectCandidateFiles(createQuery('quillwort'), files))).toEqual(['quillwort.png', 'e.canvas', 'a.md']);
     });
 
     it('keeps a note whose stats changed while the index answered', async () => {
@@ -262,12 +270,14 @@ describe('SearchNarrowingComponent', () => {
       ]);
     });
 
-    it('returns every file when it cannot narrow, when no file is vouched for, or when the index has no answer', async () => {
+    it('returns every file when it cannot narrow, when no file is narrowable, or when the index has no answer', async () => {
       const files = [file('a.md'), file('b.md'), file('d.txt')];
       isEnabled = false;
       expect(paths(await component.selectCandidateFiles(createQuery('quillwort'), files))).toEqual(['a.md', 'b.md', 'd.txt']);
       isEnabled = true;
-      expect(paths(await component.selectCandidateFiles(createQuery('quillwort'), [file('d.txt')]))).toEqual(['d.txt']);
+      notVouched = new Set(['a.md', 'b.md']);
+      expect(paths(await component.selectCandidateFiles(createQuery('quillwort'), [file('a.md'), file('b.md')]))).toEqual(['a.md', 'b.md']);
+      notVouched = new Set();
       contentCandidates = async (): Promise<null> => {
         await noopAsync();
         return null;
@@ -285,7 +295,7 @@ describe('SearchNarrowingComponent', () => {
       expect(queue.items.queue).toEqual([]);
       await waitForRelease(queue);
 
-      expect(queue.added.map((files) => paths(files))).toEqual([['d.txt', 'c.md', 'a.md']]);
+      expect(queue.added.map((files) => paths(files))).toEqual([['c.md', 'a.md']]);
     });
 
     it('keeps core\'s own unsorted order when core asks for no comparator', async () => {
@@ -295,7 +305,7 @@ describe('SearchNarrowingComponent', () => {
       const queue = search();
       await waitForRelease(queue);
 
-      expect(queue.added.map((files) => paths(files))).toEqual([paths(app.asOriginalType__().vault.getFiles().filter((f) => f.path !== 'b.md'))]);
+      expect(queue.added.map((files) => paths(files))).toEqual([paths(app.asOriginalType__().vault.getFiles().filter((f) => f.path !== 'b.md' && f.path !== 'd.txt'))]);
     });
 
     it('takes back a batch core queued some other way, keeping its order', async () => {
@@ -320,7 +330,7 @@ describe('SearchNarrowingComponent', () => {
       const queue = search();
       await waitForRelease(queue);
 
-      expect(queue.added.map((files) => paths(files))).toEqual([['c.md', 'd.txt']]);
+      expect(queue.added.map((files) => paths(files))).toEqual([['c.md']]);
     });
 
     it('gives the whole batch back when the index has no answer, or has none within the hold', async () => {
@@ -389,18 +399,20 @@ describe('SearchNarrowingComponent', () => {
       expect([replaced.added, changedQuery.added, cancelled.added]).toEqual([[], [], []]);
     });
 
-    it('lets core queue every file when it cannot narrow, when no note is vouched for, or with no compiled query', async () => {
+    it('lets core queue every file when it cannot narrow, with no compiled query, or when no file is narrowable', async () => {
       await loadPatched();
       isEnabled = false;
       expect(paths(search().items.queue)).toEqual(['a.md', 'b.md', 'c.md', 'd.txt']);
 
       isEnabled = true;
-      notVouched = new Set(['a.md', 'b.md', 'c.md']);
-      expect(paths(search().items.queue)).toEqual(['a.md', 'b.md', 'c.md', 'd.txt']);
-
       view.nextQuery = null;
       view.startSearch();
       expect(paths(castTo<FakeItemQueue>(view.queue.queue).items.queue)).toEqual(['a.md', 'b.md', 'c.md', 'd.txt']);
+
+      // Core reads the content of notes only, so with no note vouched for and no other file, nothing is narrowable.
+      notVouched = new Set(['a.md', 'b.md', 'c.md']);
+      app.vault.deleteVaultAbstractFile__('d.txt');
+      expect(paths(search().items.queue)).toEqual(['a.md', 'b.md', 'c.md']);
     });
 
     it('lets core queue every file when the plugin unloads during the search', async () => {
@@ -428,7 +440,7 @@ describe('SearchNarrowingComponent', () => {
       await waitForRelease(queue);
 
       // The index cannot rule the drawing out: blanking can add trigrams its indexed text lacks.
-      expect(queue.added.map((files) => paths(files))).toEqual([['a.md', 'c.md', 'd.txt']]);
+      expect(queue.added.map((files) => paths(files))).toEqual([['a.md', 'c.md']]);
       const drawing = '---\nexcalidraw-plugin: parsed\n---\n## Drawing\n```compressed-json\n+cat+\n```\n';
       expect(castTo<ObsidianSearchQuery>(view.searchQuery).match(file('a.md'), drawing)).toBeNull();
       expect(match).toHaveBeenCalledWith(file('a.md'), drawing.replace('+cat+', ' '.repeat(5)));
@@ -454,7 +466,7 @@ describe('SearchNarrowingComponent', () => {
       await waitForRelease(queue);
 
       expect(Object.getOwnPropertyDescriptor(view.queue, 'start')?.value).toBe(ownStart);
-      expect(queue.added.map((files) => paths(files))).toEqual([['a.md', 'c.md', 'd.txt']]);
+      expect(queue.added.map((files) => paths(files))).toEqual([['a.md', 'c.md']]);
     });
   });
 
