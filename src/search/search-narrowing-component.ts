@@ -274,6 +274,14 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
         : `Query "${batch.prepared.searchQuery.query}" got no narrowing from the index in ${elapsed} ms; core scans every file`
     );
     batch.queue.addList(kept);
+    if (kept.length > 0) {
+      return;
+    }
+
+    // Core's queue reports a search done (its loader stopped, the result count set) only when it runs dry after a
+    // dequeue, which an empty queue never makes; so the empty batch reports it here.
+    batch.queue.runnable.start();
+    batch.queue.runnable.stop();
   }
 
   /**

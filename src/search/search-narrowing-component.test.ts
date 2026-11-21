@@ -59,8 +59,15 @@ class FakeItemQueue {
   public readonly items = { offset: 0, queue: [] as TFile[] };
   public readonly runnable = {
     cancelled: false,
+    events: [] as string[],
     isCancelled(): boolean {
       return this.cancelled;
+    },
+    start(): void {
+      this.events.push('start');
+    },
+    stop(): void {
+      this.events.push('stop');
     }
   };
 
@@ -331,6 +338,29 @@ describe('SearchNarrowingComponent', () => {
       await waitForRelease(queue);
 
       expect(queue.added.map((files) => paths(files))).toEqual([['c.md']]);
+    });
+
+    it('reports the search done when the narrowing keeps no file, and not otherwise', async () => {
+      await loadPatched();
+      app.vault.deleteVaultAbstractFile__('d.txt');
+      contentCandidates = async (): Promise<Set<string>> => {
+        await noopAsync();
+        return new Set();
+      };
+
+      const empty = search();
+      await vi.waitFor(() => {
+        expect(empty.runnable.events).toEqual(['start', 'stop']);
+      }, { timeout: HOLD_WAIT_IN_MILLISECONDS });
+      expect(empty.added).toEqual([]);
+
+      contentCandidates = async (): Promise<Set<string>> => {
+        await noopAsync();
+        return new Set(['a.md']);
+      };
+      const kept = search();
+      await waitForRelease(kept);
+      expect(kept.runnable.events).toEqual([]);
     });
 
     it('gives the whole batch back when the index has no answer, or has none within the hold', async () => {
