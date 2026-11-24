@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 1.1.1
+
+This release has 1 fix, 1 improvement and 1 documentation change. 3 maintenance commits (tests, build, CI, refactoring, dependencies) are not listed.
+
+### Fixed
+
+- Query is only filtered on ENTER (#2)
+
+### Improved
+
+- **search:** narrow attachments, cache postings and check paths by folder
+
+### Documentation
+
+- **readme:** use the plugin badge line with Obsidian downloads, minimum version, CI and coverage
+
 ## 1.1.0
 
 This release has 1 new feature, 1 fix and 3 documentation changes. 3 maintenance commits (tests, build, CI, refactoring, dependencies) are not listed.
