@@ -5,8 +5,9 @@
  * term found only in its drawing data, still lists it for its text elements, and lists every other note as before.
  * Off, it lists exactly what core lists.
  *
- * Search is driven through the view's own `startSearch`, which is what its input box calls; the result list is
- * read from the view's result lookup once its queue stops.
+ * Search is driven through the view's own `startSearch`, which is what pressing Enter in its input box calls, and by
+ * typing the query with trusted key presses; the result list is read from the view's result lookup once its queue
+ * stops.
  */
 
 import type { SearchView } from '@obsidian-typings/obsidian-public-latest';
@@ -168,6 +169,71 @@ describe('ignoring Excalidraw drawing data', () => {
       calamint: [],
       kittenwort: [`${FOLDER}/sketch.excalidraw.md`],
       zebrawort: [`${FOLDER}/fake.md`, `${FOLDER}/plain.md`]
+    });
+  });
+
+  it('drops a drawing matched only in its data while the query is typed, before Enter', async () => {
+    // Typing runs the debounced `startSearch` core bound when it built the view, not the method on the prototype.
+    const result = await evalInObsidian({
+      async callback({ app, folder, lib: { pressKey }, pluginId }) {
+        const plugin = app.plugins.getPlugin(pluginId) as null | SettingsPlugin;
+        if (!plugin) {
+          throw new Error('Plugin not loaded');
+        }
+        await plugin.pluginSettingsComponent.editAndSave((settings) => {
+          settings.shouldIgnoreExcalidrawDrawings = true;
+        });
+
+        async function typeSearch(query: string): Promise<string[]> {
+          let leaf = app.workspace.getLeavesOfType('search')[0];
+          if (!leaf) {
+            app.internalPlugins.getEnabledPluginById('global-search')?.openGlobalSearch('');
+            leaf = app.workspace.getLeavesOfType('search')[0];
+          }
+          if (!leaf) {
+            throw new Error('Core Search view is not available');
+          }
+          await app.workspace.revealLeaf(leaf);
+          const view = leaf.view as SearchView;
+          const component = view.queue;
+          const originalStart = component.start.bind(component);
+          const stopped = new Promise<void>((resolve) => {
+            component.start = (options): ReturnType<typeof originalStart> =>
+              originalStart({
+                ...options,
+                onStop(): void {
+                  options?.onStop?.();
+                  if (view.searchQuery?.query === query) {
+                    resolve();
+                  }
+                }
+              });
+          });
+          try {
+            view.searchComponent.setValue('');
+            view.searchComponent.inputEl.focus();
+            for (const key of query) {
+              await pressKey({ key });
+            }
+            await stopped;
+          } finally {
+            Reflect.deleteProperty(component, 'start');
+          }
+          return Array.from(view.dom.resultDomLookup.keys(), (file) => file.path).filter((path) => path.startsWith(`${folder}/`)).sort();
+        }
+
+        return {
+          calamint: await typeSearch('calamint'),
+          kittenwort: await typeSearch('kittenwort')
+        };
+      },
+      input: { folder: FOLDER, pluginId: PLUGIN_ID },
+      vaultPath
+    });
+
+    expect(result).toEqual({
+      calamint: [],
+      kittenwort: [`${FOLDER}/sketch.excalidraw.md`]
     });
   });
 });

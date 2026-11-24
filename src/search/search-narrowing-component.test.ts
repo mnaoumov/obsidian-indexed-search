@@ -1,6 +1,7 @@
 import type {
   ItemQueue,
   ObsidianSearchQuery,
+  SearchQueueStartOptions,
   SearchView
 } from '@obsidian-typings/obsidian-public-latest/implementations';
 import type {
@@ -95,15 +96,20 @@ class FakeQueueComponent {
    * When set, the queue is filled with these files rather than with a sorted `vault.getFiles()`.
    */
   public seedFiles: null | TFile[] = null;
+  public readonly unmatchedFiles = new Set<TFile>();
 
   public constructor(private readonly vault: Vault) {}
 
-  public start(_options: unknown): FakeItemQueue {
+  public start(options?: SearchQueueStartOptions): FakeItemQueue {
     const queue = new FakeItemQueue();
     if (this.seedFiles) {
       queue.addList(this.seedFiles);
     } else {
-      const files = this.vault.getFiles();
+      let files = this.vault.getFiles();
+      // Core skips the files the previous search did not match when the new query only narrows it.
+      if (options?.narrows) {
+        files = files.filter((f) => !this.unmatchedFiles.has(f));
+      }
       queue.addList(this.comparator ? files.sort(this.comparator) : files.sort());
     }
     this.queue = queue;
@@ -116,18 +122,24 @@ class FakeQueueComponent {
  */
 class FakeSearchView {
   public beforeStart: (() => void) | null = null;
+  public narrows = false;
   public nextQuery: null | ObsidianSearchQuery = null;
   public readonly queue: FakeQueueComponent;
   public searchQuery: null | ObsidianSearchQuery = null;
+  /**
+   * Core's debounced search for typed input, bound when the view is built, before any patch.
+   */
+  public readonly typedSearch: () => void;
 
   public constructor(vault: Vault) {
     this.queue = new FakeQueueComponent(vault);
+    this.typedSearch = this.startSearch.bind(this);
   }
 
   public startSearch(): void {
     this.searchQuery = this.nextQuery;
     this.beforeStart?.();
-    this.queue.start({});
+    this.queue.start({ narrows: this.narrows });
   }
 }
 
@@ -487,16 +499,50 @@ describe('SearchNarrowingComponent', () => {
       expect(searchQuery.match).toBe(match);
     });
 
-    it('restores an own start property of the queue component after the call', async () => {
+    it('narrows a typed search, which calls the startSearch core bound before the patch', async () => {
       await loadPatched();
-      const ownStart = view.queue.start.bind(view.queue);
-      Object.defineProperty(view.queue, 'start', { configurable: true, value: ownStart, writable: true });
+      shouldIgnoreExcalidrawDrawings = true;
+      const match = vi.fn(() => null);
+      view.nextQuery = castTo<ObsidianSearchQuery>({ match, matcher: {}, query: 'quillwort' });
+
+      view.typedSearch();
+      const queue = castTo<FakeItemQueue>(view.queue.queue);
+      expect(queue.items.queue).toEqual([]);
+      await waitForRelease(queue);
+
+      expect(queue.added.map((files) => paths(files))).toEqual([['a.md', 'c.md']]);
+      expect(castTo<ObsidianSearchQuery>(view.searchQuery).match).not.toBe(match);
+    });
+
+    it('keeps core skipping the files the previous search did not match when the query only narrows it', async () => {
+      await loadPatched();
+      view.queue.unmatchedFiles.add(file('c.md'));
+      view.narrows = true;
 
       const queue = search();
       await waitForRelease(queue);
 
-      expect(Object.getOwnPropertyDescriptor(view.queue, 'start')?.value).toBe(ownStart);
+      expect(queue.added.map((files) => paths(files))).toEqual([['a.md']]);
+    });
+
+    it('restores an own getFiles property of the vault after the call', async () => {
+      await loadPatched();
+      const vault = app.asOriginalType__().vault;
+      const ownGetFiles = vault.getFiles.bind(vault);
+      Object.defineProperty(vault, 'getFiles', { configurable: true, value: ownGetFiles, writable: true });
+
+      const queue = search();
+      await waitForRelease(queue);
+
+      expect(Object.getOwnPropertyDescriptor(vault, 'getFiles')?.value).toBe(ownGetFiles);
       expect(queue.added.map((files) => paths(files))).toEqual([['a.md', 'c.md']]);
+    });
+
+    it('leaves alone a queue component that belongs to no Search view', async () => {
+      await loadPatched();
+      const other = new FakeQueueComponent(app.asOriginalType__().vault);
+
+      expect(paths(other.start({}).items.queue)).toEqual(['a.md', 'b.md', 'c.md', 'd.txt']);
     });
   });
 
@@ -513,9 +559,9 @@ describe('SearchNarrowingComponent', () => {
       getLeavesOfType.mockReturnValue(castTo([{ view }]));
       app.workspace.trigger('layout-change');
       app.workspace.trigger('layout-change');
+      expect(getLeavesOfType).toHaveBeenCalledTimes(2);
 
       expect(search().items.queue).toEqual([]);
-      expect(getLeavesOfType).toHaveBeenCalledTimes(2);
     });
 
     it('removes the patch on unload', async () => {
