@@ -18,6 +18,7 @@ import type {
   ItemQueue,
   ObsidianSearchQuery,
   SearchMatcherGuards,
+  SearchQueueComponent,
   SearchView
 } from '@obsidian-typings/obsidian-public-latest/implementations';
 import type {
@@ -93,7 +94,15 @@ type FileComparator = (left: TFile, right: TFile) => number;
 interface FileSeed {
   // eslint-disable-next-line typescript-dev-toolkit/readonly-interface-members -- the seed's `sort` records it.
   compare: FileComparator | null;
-  readonly files: TFile[];
+  /**
+   * The vault's files, after every filter core applied to {@link list}.
+   */
+  // eslint-disable-next-line typescript-dev-toolkit/readonly-interface-members -- the seed's `filter` narrows it.
+  files: TFile[];
+  /**
+   * The empty list core is handed.
+   */
+  readonly list: TFile[];
 }
 
 /**
@@ -109,14 +118,6 @@ interface HeldBatch {
   readonly prepared: PreparedSearch;
   readonly queue: ItemQueue<TFile>;
   readonly universe: readonly TFile[];
-}
-
-/**
- * Where the one startSearch call's wrapper leaves the batch it held.
- */
-interface HeldBatchSlot {
-  // eslint-disable-next-line typescript-dev-toolkit/readonly-interface-members -- the wrapper fills it during the call.
-  batch: HeldBatch | null;
 }
 
 /**
@@ -234,14 +235,21 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
     if (universe.length === 0) {
       return [start(), null];
     }
-    const seed = createFileSeed();
-    const queue = withTemporaryProperty(vault, 'getFiles', () => seed.files, start);
+    const seed = createFileSeed(files);
+    const queue = withTemporaryProperty(vault, 'getFiles', () => seed.list, start);
     const seeded = queue.items.queue.slice(queue.items.offset);
     if (seeded.length > 0) {
       queue.clear();
       return [queue, { compare: null, files: seeded, prepared, queue, universe }];
     }
-    return [queue, { compare: seed.compare, files, prepared, queue, universe }];
+    const kept = seed.files;
+    return [queue, {
+      compare: seed.compare,
+      files: kept,
+      prepared,
+      queue,
+      universe: kept === files ? universe : kept.filter((file) => this.isNarrowable(file))
+    }];
   }
 
   /**
@@ -255,6 +263,22 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
   private async findExcluded(prepared: PreparedSearch, universe: readonly TFile[]): Promise<null | Set<TFile>> {
     const candidates = await evaluateCandidates(prepared.expression, universe, prepared.source);
     return candidates ? new Set(universe.filter((file) => !candidates.has(file))) : null;
+  }
+
+  /**
+   * Finds the Search view a queue component belongs to. Other core result panes use the same queue component class.
+   *
+   * @param component - The queue component.
+   * @returns The Search view, or `null` when the component is not a Search view's.
+   */
+  private findSearchView(component: SearchQueueComponent): null | SearchView {
+    for (const leaf of this.app.workspace.getLeavesOfType(ViewType.Search)) {
+      const view = leaf.view as SearchView;
+      if (view.queue === component) {
+        return view;
+      }
+    }
+    return null;
   }
 
   private giveBack(view: SearchView, batch: HeldBatch, excluded: null | Set<TFile>, elapsedInMilliseconds: number): void {
@@ -316,45 +340,66 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
     }
     this.isPatched = true;
     const monkeyAroundComponent = this.addChild(new MonkeyAroundComponent());
+    // The patch goes on the queue component's `start`, not on `SearchView.startSearch`: the view binds a debounced
+    // `startSearch` when it is built, so a query typed into the box calls the method as it was before any patch, and
+    // only pressing Enter calls it through the prototype. Every search, typed or not, calls `start`.
     monkeyAroundComponent.registerMethodPatch({
-      $object: getPrototypeOf(view),
-      methodName: 'startSearch',
+      $object: getPrototypeOf(view.queue),
+      methodName: 'start',
       patchHandler: ({ fallback, originalThis }) => {
-        const held: HeldBatchSlot = { batch: null };
-        const component = originalThis.queue;
-        const previousStart = component.start.bind(component);
-        // The queue component lists the files synchronously inside `start`, and core starts consuming them right
-        // after it returns, so the batch is held back there. The wrapper lives only for this one call.
-        withTemporaryProperty(component, 'start', (options): ItemQueue<TFile> => {
-          // Core stores the compiled query before it starts the queue, so the index reads can begin first.
-          const searchQuery = originalThis.searchQuery;
-          if (!this.isUnloaded() && searchQuery && this.shouldIgnoreExcalidrawDrawings()) {
-            // Core's scan calls this query's own `match` for every file it reads.
-            ignoreExcalidrawDrawings(searchQuery);
-          }
-          const prepared = !this.isUnloaded() && searchQuery ? this.prepare(searchQuery) : null;
-          if (!prepared) {
-            return previousStart(options);
-          }
-          const [queue, batch] = this.startHeld(prepared, () => previousStart(options));
-          held.batch = batch;
-          return queue;
-        }, fallback);
-        const heldBatch = held.batch;
-        if (heldBatch) {
-          invokeAsyncSafely(async () => this.release(originalThis, heldBatch));
+        // Unloading removes the patch, so a call that reaches it comes from a loaded plugin.
+        const searchView = this.findSearchView(originalThis);
+        // Core stores the compiled query before it starts the queue, so the index reads can begin first.
+        const searchQuery = searchView?.searchQuery;
+        if (!searchView || !searchQuery) {
+          return fallback();
         }
+        if (this.shouldIgnoreExcalidrawDrawings()) {
+          // Core's scan calls this query's own `match` for every file it reads.
+          ignoreExcalidrawDrawings(searchQuery);
+        }
+        const prepared = this.prepare(searchQuery);
+        if (!prepared) {
+          return fallback();
+        }
+        // The queue component lists the files synchronously inside `start`, and core starts consuming them right
+        // after it returns, so the batch is held back here.
+        const [queue, batch] = this.startHeld(prepared, fallback);
+        if (batch) {
+          // The release awaits the index first, so it gives the batch back after core's `startSearch` returns.
+          invokeAsyncSafely(async () => this.release(searchView, batch));
+        }
+        return queue;
       }
     });
   }
 }
 
-function createFileSeed(): FileSeed {
-  const seed: FileSeed = { compare: null, files: [] };
-  Object.defineProperty(seed.files, 'sort', {
-    value: (compare?: FileComparator): TFile[] => {
-      seed.compare = compare ?? null;
-      return seed.files;
+/**
+ * Creates the empty list core's queue component is handed in place of the vault's files.
+ *
+ * Core filters the list (a search that only narrows the previous one skips the files that one did not match, catalyst
+ * 1.15.1) and sorts it. The seed applies each filter to the real files at once, so the filter sees the state core
+ * meant, and records the comparator.
+ *
+ * @param files - The vault's files.
+ * @returns The seed.
+ */
+function createFileSeed(files: TFile[]): FileSeed {
+  const list: TFile[] = [];
+  const seed: FileSeed = { compare: null, files, list };
+  Object.defineProperties(list, {
+    filter: {
+      value: (predicate: (file: TFile, index: number, array: TFile[]) => unknown): TFile[] => {
+        seed.files = seed.files.filter((file, index, array) => predicate(file, index, array));
+        return list;
+      }
+    },
+    sort: {
+      value: (compare?: FileComparator): TFile[] => {
+        seed.compare = compare ?? null;
+        return list;
+      }
     }
   });
   return seed;
