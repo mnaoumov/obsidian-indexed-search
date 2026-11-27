@@ -47,6 +47,17 @@ export function searchInPane(app: App, query: string): void {
 }
 
 /**
+ * Turns the plugin's `shouldIgnoreExcalidrawDrawings` on or off, the same way `setShouldNarrowSearch` does.
+ *
+ * Manual equivalent: switch **Ignore `Excalidraw` drawing data** in **Settings -> Community plugins ->
+ * `Indexed Search`**.
+ */
+export async function setShouldIgnoreExcalidrawDrawings(app: App, shouldIgnoreExcalidrawDrawings: boolean): Promise<void> {
+  await configureCommunityPlugin({ app, pluginId: PLUGIN_ID, settings: { shouldIgnoreExcalidrawDrawings } });
+  new Notice(`shouldIgnoreExcalidrawDrawings is now ${String(shouldIgnoreExcalidrawDrawings)}. It applies to the next search.`);
+}
+
+/**
  * Turns the plugin's `shouldNarrowSearch` on or off.
  *
  * `configureCommunityPlugin` routes through the plugin's own settings component while it is loaded, so the
