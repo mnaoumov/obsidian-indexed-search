@@ -7,7 +7,10 @@
 import { noop } from '@mnaoumov/typescript-lib/function';
 
 import type { TrigramQuery } from '../trigram-index/trigram-query.ts';
-import type { CandidateExpression } from './candidate-expression.ts';
+import type {
+  CandidateExpression,
+  TermScope
+} from './candidate-expression.ts';
 
 import { createPathChecker } from '../trigram-index/trigram-query.ts';
 
@@ -24,6 +27,15 @@ export interface CandidateSource<File> {
    * @returns The paths, or `null` when every note may.
    */
   readonly getContentCandidates: (query: TrigramQuery) => Promise<null | ReadonlySet<string>>;
+
+  /**
+   * Returns a file's name, with its extension and without its folders: what core matches a term against outside
+   * `path:`.
+   *
+   * @param file - The file.
+   * @returns Its name.
+   */
+  readonly getName: (file: File) => string;
 
   /**
    * Returns a file's path.
@@ -91,15 +103,17 @@ export async function evaluateCandidates<File>(
       }));
     }
     case 'term': {
-      const contentPaths = expression.scope === 'path' ? new Set<string>() : await source.getContentCandidates(expression.query);
+      const contentPaths = doesReadContent(expression.scope) ? await source.getContentCandidates(expression.query) : new Set<string>();
       if (!contentPaths) {
         return null;
       }
-      const canPathSatisfy = expression.scope === 'content' ? null : createPathChecker(expression.query);
-      return new Set(files.filter((file) => {
-        const path = source.getPath(file);
-        return contentPaths.has(path) || (canPathSatisfy?.(path) ?? false);
-      }));
+      if (expression.scope === 'content') {
+        return new Set(files.filter((file) => contentPaths.has(source.getPath(file))));
+      }
+      // A file name holds no `/`, so the path checker scans it whole, with no folder to remember.
+      const canTextSatisfy = createPathChecker(expression.query);
+      const getText = expression.scope === 'path' ? source.getPath : source.getName;
+      return new Set(files.filter((file) => contentPaths.has(source.getPath(file)) || canTextSatisfy(getText(file))));
     }
     default: {
       throw new Error(`Unexpected candidate expression: ${JSON.stringify(expression)}`);
@@ -134,7 +148,7 @@ export function prefetchContentCandidates<File>(expression: CandidateExpression,
         break;
       }
       case 'term': {
-        if (node.scope !== 'path' && !pending.has(node.query)) {
+        if (doesReadContent(node.scope) && !pending.has(node.query)) {
           const promise = source.getContentCandidates(node.query);
           // An OR that meets an unanswerable child stops before awaiting the rest; that must not be an unhandled rejection.
           promise.catch(noop);
@@ -152,4 +166,8 @@ export function prefetchContentCandidates<File>(expression: CandidateExpression,
     ...source,
     getContentCandidates: async (query) => pending.get(query) ?? source.getContentCandidates(query)
   };
+}
+
+function doesReadContent(scope: TermScope): boolean {
+  return scope === 'content' || scope === 'contentOrName';
 }

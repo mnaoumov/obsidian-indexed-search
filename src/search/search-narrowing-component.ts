@@ -57,6 +57,12 @@ import {
 const HOLD_TIMEOUT_IN_MILLISECONDS = 1000;
 
 /**
+ * The most files a narrowing search (one whose query extends the previous one, so core re-scans only what that one
+ * did not rule out) gives core at once, with no hold for the index.
+ */
+const NARROWING_SEARCH_HOLD_LIMIT = 1000;
+
+/**
  * The extensions whose content core Search reads; every other file it matches by name and path alone.
  */
 const CONTENT_EXTENSIONS = new Set(['canvas', 'md']);
@@ -175,6 +181,7 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
     }
     const source = prefetchContentCandidates<TFile>(expression, {
       getContentCandidates: async (query) => this.trigramIndexComponent.getContentCandidates(query),
+      getName: (file) => file.name,
       getPath: (file) => file.path,
       getTags: (file) => {
         const cache = this.app.metadataCache.getFileCache(file);
@@ -243,6 +250,12 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
       return [queue, { compare: null, files: seeded, prepared, queue, universe }];
     }
     const kept = seed.files;
+    if (kept !== files && kept.length > 0 && kept.length <= NARROWING_SEARCH_HOLD_LIMIT) {
+      // Core narrowed the previous search's files down to a few, and reading them costs less than waiting for the
+      // index (100 to 300 ms) would save; so they go straight back, in core's order.
+      queue.addList(seed.compare ? [...kept].sort(seed.compare) : kept);
+      return [queue, null];
+    }
     return [queue, {
       compare: seed.compare,
       files: kept,
@@ -288,6 +301,14 @@ export class SearchNarrowingComponent extends LayoutReadyComponent {
     // A note edited, renamed or created during the hold is queued again by core's own events, so only a deleted
     // note needs checking here.
     const kept = batch.files.filter((file) => !excluded?.has(file) && this.app.vault.getAbstractFileByPath(file.path) === file);
+    if (excluded) {
+      // Core's matcher never sees an excluded file, so it would never record it as unmatched, and the next keystroke's
+      // narrowing search, which skips only the files recorded, would queue every excluded file again. Recording them
+      // is what core itself does for each file it reads and does not match; a file that changes leaves the record.
+      for (const file of excluded) {
+        view.queue.setMatched(file, false);
+      }
+    }
     if (batch.compare) {
       kept.sort(batch.compare);
     }

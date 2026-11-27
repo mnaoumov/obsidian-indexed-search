@@ -100,6 +100,14 @@ class FakeQueueComponent {
 
   public constructor(private readonly vault: Vault) {}
 
+  public setMatched(file: TFile, isMatched: boolean): void {
+    if (isMatched) {
+      this.unmatchedFiles.delete(file);
+    } else {
+      this.unmatchedFiles.add(file);
+    }
+  }
+
   public start(options?: SearchQueueStartOptions): FakeItemQueue {
     const queue = new FakeItemQueue();
     if (this.seedFiles) {
@@ -270,7 +278,7 @@ describe('SearchNarrowingComponent', () => {
     });
 
     it('keeps a file core reads no content of when its path may match, and always keeps a canvas', async () => {
-      expression = { kind: 'term', query: literalQuery('quillwort'), scope: 'contentOrPath' };
+      expression = { kind: 'term', query: literalQuery('quillwort'), scope: 'contentOrName' };
       app.vault.createSync__('quillwort.png', '');
       app.vault.createSync__('e.canvas', '{}');
       const files = [file('d.txt'), file('quillwort.png'), file('e.canvas'), file('b.md'), file('a.md')];
@@ -514,15 +522,56 @@ describe('SearchNarrowingComponent', () => {
       expect(castTo<ObsidianSearchQuery>(view.searchQuery).match).not.toBe(match);
     });
 
-    it('keeps core skipping the files the previous search did not match when the query only narrows it', async () => {
+    it('gives a narrowing search\'s few files straight back, in core\'s order, with no wait for the index', async () => {
       await loadPatched();
+      const getContentCandidates = vi.fn(contentCandidates);
+      contentCandidates = getContentCandidates;
+      view.queue.comparator = byPathDescending;
       view.queue.unmatchedFiles.add(file('c.md'));
       view.narrows = true;
 
       const queue = search();
+
+      expect(queue.added.map((files) => paths(files))).toEqual([['d.txt', 'b.md', 'a.md']]);
+      await noopAsync();
+      expect(queue.added).toHaveLength(1);
+    });
+
+    it('gives a narrowing search\'s few files straight back unsorted when core asks for no comparator', async () => {
+      await loadPatched();
+      view.queue.comparator = null;
+      view.queue.unmatchedFiles.add(file('c.md'));
+      view.narrows = true;
+
+      const queue = search();
+
+      expect(queue.added.map((files) => paths(files))).toEqual([
+        paths(app.asOriginalType__().vault.getFiles().filter((f) => f.path !== 'c.md'))
+      ]);
+    });
+
+    it('holds a narrowing search that keeps more files than it gives back at once, skipping the unmatched ones', async () => {
+      await loadPatched();
+      for (let index = 0; index < 1000; index++) {
+        app.vault.createSync__(`many/${String(index)}.md`, 'nothing');
+      }
+      view.queue.unmatchedFiles.add(file('c.md'));
+      view.narrows = true;
+
+      const queue = search();
+      expect(queue.items.queue).toEqual([]);
       await waitForRelease(queue);
 
       expect(queue.added.map((files) => paths(files))).toEqual([['a.md']]);
+    });
+
+    it('records the files it rules out as unmatched, so the next narrowing search skips them too', async () => {
+      await loadPatched();
+
+      const queue = search();
+      await waitForRelease(queue);
+
+      expect(paths([...view.queue.unmatchedFiles]).sort()).toEqual(['b.md', 'd.txt']);
     });
 
     it('restores an own getFiles property of the vault after the call', async () => {

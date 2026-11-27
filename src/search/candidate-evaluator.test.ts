@@ -8,7 +8,10 @@ import {
 
 import type { TrigramQuery } from '../trigram-index/trigram-query.ts';
 import type { CandidateSource } from './candidate-evaluator.ts';
-import type { CandidateExpression } from './candidate-expression.ts';
+import type {
+  CandidateExpression,
+  TermScope
+} from './candidate-expression.ts';
 
 import {
   formatQuery,
@@ -39,6 +42,7 @@ function createSource(lookups: string[] = []): CandidateSource<FakeNote> {
       await noopAsync();
       return query.kind === 'all' ? null : new Set(NOTES.filter((note) => isContentMatch(note, query)).map((note) => note.path));
     },
+    getName: (note) => note.path.slice(note.path.lastIndexOf('/') + 1),
     getPath: (note) => note.path,
     getTags: (note) => note.tags
   };
@@ -53,7 +57,7 @@ function isContentMatch(note: FakeNote, query: TrigramQuery): boolean {
   return ['quillwort', 'lantern', 'silver'].some((word) => note.content.includes(word) && formatQuery(literalQuery(word)) === formatQuery(query));
 }
 
-function term(word: string, scope: 'content' | 'contentOrPath' | 'path' = 'contentOrPath'): CandidateExpression {
+function term(word: string, scope: TermScope = 'contentOrName'): CandidateExpression {
   return { kind: 'term', query: literalQuery(word), scope };
 }
 
@@ -62,14 +66,17 @@ describe('evaluateCandidates', () => {
     expect(await evaluate({ kind: 'all' })).toBeNull();
   });
 
-  it('matches a term in the content or the path', async () => {
-    expect(await evaluate(term('quillwort'))).toEqual(['four.md', 'plants/one.md', 'quillwort/three.md']);
+  it('matches a term in the content or the file name, never in a folder name', async () => {
+    expect(await evaluate(term('quillwort'))).toEqual(['four.md', 'plants/one.md']);
+    expect(await evaluate(term('three'))).toEqual(['quillwort/three.md']);
   });
 
-  it('matches a content term only in the content, and a path term only in the path', async () => {
+  it('matches a content term only in the content, a name term only in the name, and a path term in the path', async () => {
     expect(await evaluate(term('quillwort', 'content'))).toEqual(['four.md', 'plants/one.md']);
     const lookups: string[] = [];
     expect(await evaluate(term('quillwort', 'path'), createSource(lookups))).toEqual(['quillwort/three.md']);
+    expect(await evaluate(term('quillwort', 'name'), createSource(lookups))).toEqual([]);
+    expect(await evaluate(term('three', 'name'), createSource(lookups))).toEqual(['quillwort/three.md']);
     expect(lookups).toEqual([]);
   });
 
