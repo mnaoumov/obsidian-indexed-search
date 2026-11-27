@@ -5,6 +5,9 @@ import type {
 } from 'obsidian';
 
 import { castTo } from '@mnaoumov/typescript-lib/object-utils';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import process from 'node:process';
 import { App } from 'obsidian-test-mocks/obsidian';
 import {
   describe,
@@ -39,6 +42,19 @@ describe('isExcalidrawContent', () => {
 });
 
 describe('maskExcalidrawDrawing', () => {
+  it('hides the demo vault drawing\'s chance word and keeps its text element, as 02 Settings says', () => {
+    // The `Try it` steps of the demo vault's `02 Settings.md` rest on this note: `cab` only in its compressed data,
+    // `shed` in its text.
+    const gardenSketch = readFileSync(join(process.cwd(), 'demo-vault/Materials/02 Settings/Garden sketch.md'), 'utf-8');
+    const masked = maskExcalidrawDrawing(gardenSketch);
+
+    expect(isExcalidrawContent(gardenSketch)).toBe(true);
+    expect(gardenSketch).toMatch(/cab/i);
+    expect(masked).not.toMatch(/cab/i);
+    expect(masked).toMatch(/shed/i);
+    expect(masked).toHaveLength(gardenSketch.length);
+  });
+
   it('blanks the drawing block body, keeping the length, the lines and the rest of the note', () => {
     const masked = maskExcalidrawDrawing(DRAWING);
 

@@ -45,3 +45,47 @@ await require('/demoSetup.ts').setShouldNarrowSearch(app, true);
 ```
 
 Manual equivalent: turn **Narrow core Search** back on.
+
+## Try ignoring `Excalidraw` drawing data
+
+[Garden sketch](<./Materials/02 Settings/Garden sketch.md>) is an `Excalidraw` drawing, and its compressed drawing data happens to spell `cab`, a word its text never says. You do not need `Excalidraw` installed to try this. Search for it with the setting off, as it is by default:
+
+```code-button
+---
+caption: Search for "cab" with drawing data searched
+---
+require('/demoSetup.ts').searchInPane(app, 'path:"Materials/02 Settings" cab');
+```
+
+Manual equivalent: type the same query into the Search pane.
+
+Core Search lists the drawing, because it matches `cab` inside the base64 under its `Drawing` heading. Now turn the setting on:
+
+```code-button
+---
+caption: Turn shouldIgnoreExcalidrawDrawings on
+---
+await require('/demoSetup.ts').setShouldIgnoreExcalidrawDrawings(app, true);
+```
+
+Manual equivalent: turn on **Ignore `Excalidraw` drawing data** in the settings tab.
+
+Search again, and the drawing is gone from the results:
+
+```code-button
+---
+caption: Search for "cab" with drawing data ignored
+---
+require('/demoSetup.ts').searchInPane(app, 'path:"Materials/02 Settings" cab');
+```
+
+A word from the drawing's text, such as `shed`, still finds it, because `Excalidraw` repeats that text under `Text Elements`. When you are done, turn the setting back off:
+
+```code-button
+---
+caption: Turn shouldIgnoreExcalidrawDrawings back off
+---
+await require('/demoSetup.ts').setShouldIgnoreExcalidrawDrawings(app, false);
+```
+
+Manual equivalent: turn **Ignore `Excalidraw` drawing data** back off.
