@@ -17,9 +17,10 @@ The candidates come from a **trigram index**, the technique of Google Code Searc
 What already exists, so the plugin does not rebuild it:
 
 - **`Omnisearch`** (`omnisearch`) keeps a persistent full-text index too, but behind its own fuzzy, ranked search box on MiniSearch, an in-memory inverted index. It does not change what core Search does, and its results are not core's.
-- **`CFR Find`** (`cfr-find`), **`Power Explorer`** (`powerexplorer`), **`Lean Search`** (`lean-search`), **`VaultDex`** (`vaultdex`) and **`Vault Finder`** (`vault-finder`) are other separate search UIs with their own index or ranking.
+- **`CFR Find`** (`cfr-find`), **`Power Explorer`** (`powerexplorer`), **`Lean Search`** (`lean-search`), **`VaultDex`** (`vaultdex`), **`Vault Finder`** (`vault-finder`), **`Fast Find 10K`** (`fast-find`), **`Jet Search`** (`jet-search`) and **`Radar Search`** (`primecore-search`) are other separate search UIs with their own index or ranking.
+- **`RGA Search`** (`rga-search`) searches inside PDFs, EPUBs and Office files through the external `ripgrep-all`, which core Search does not read at all.
 - **`Native Search`** (`native-search`) answers from the operating system's own index (macOS Spotlight) in a separate UI.
-- **`Core Search Assistant`** (`obsidian-core-search-assistant-plugin`), **`Better Search Views`** (`better-search-views`), **`Advanced search`** (`advanced-search`), **`Native Search Replace`** (`native-search-replace`), **`Better Search Result Views`** (`better-search-result-views`) and **`CJK Search`** (`cjk-search-probe`) extend core Search's interface or matching, but none makes it faster.
+- **`Core Search Assistant`** (`obsidian-core-search-assistant-plugin`), **`Better Search Views`** (`better-search-views`), **`Advanced search`** (`advanced-search`), **`Native Search Replace`** (`native-search-replace`), **`Better Search Result Views`** (`better-search-result-views`), **`CJK Search`** (`cjk-search-probe`), **`Title First Search`** (`title-first-search`), **`Floating Search`** (`float-search`) and **`Float Search Window`** (`float-search-window`) extend core Search's interface or matching, but none makes it faster.
 
 None of them speeds up core Search itself while keeping its results. That is this plugin's whole scope.
 
