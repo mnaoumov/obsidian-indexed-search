@@ -33,7 +33,7 @@ Core Search has no index: every query reads every note in the vault and runs its
 
 A copy of the vault ships with every release. You can access it via any of the following:
 
-1. Running the **`Indexed Search`: Open demo vault** command.
+1. Running the **`Indexed Search`: Open demo vault** command, on desktop. The command is not available on mobile, so use the next option there.
 2. Downloading `indexed-search-demo-vault.zip` from the [Releases](https://github.com/mnaoumov/obsidian-indexed-search/releases). It unzips into a single `indexed-search-demo-vault-<version>` folder.
 3. Browsing its source in [`demo-vault/`](./demo-vault/README.md) in this repository.
 
