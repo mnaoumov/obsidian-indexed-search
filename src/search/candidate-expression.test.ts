@@ -99,17 +99,17 @@ function unary(kind: MatcherKind, matcher: SearchMatcher): SearchMatcher {
 
 describe('translateMatcher', () => {
   it('searches a bare term in content and path', () => {
-    expect(translate(text('Quill'))).toBe('contentOrPath(QUI AND UIL AND ILL)');
+    expect(translate(text('Quill'))).toBe('contentOrName(QUI AND UIL AND ILL)');
   });
 
   it('searches the literal of quoted text', () => {
     const quoted = node('quotedText', strictProxy<SearchQuotedTextMatcher>({ text: 'harbour lantern' }));
-    expect(translate(quoted)).toContain('contentOrPath(HAR AND');
+    expect(translate(quoted)).toContain('contentOrName(HAR AND');
   });
 
   it('derives a regex term from its source', () => {
     const regex = node('regex', strictProxy<SearchRegexMatcher>({ regex: 'foo(bar|baz)' }));
-    expect(translate(regex)).toBe('contentOrPath((FOO AND OOB AND OBA AND BAR) OR (FOO AND OOB AND OBA AND BAZ))');
+    expect(translate(regex)).toBe('contentOrName((FOO AND OOB AND OBA AND BAR) OR (FOO AND OOB AND OBA AND BAZ))');
   });
 
   it('narrows nothing for a term shorter than a trigram', () => {
@@ -118,41 +118,41 @@ describe('translateMatcher', () => {
 
   it('intersects AND and drops its unknown children', () => {
     const property = node('property', strictProxy<SearchMatcher>({}));
-    expect(translate(and(FOO, property, BAR))).toBe('(contentOrPathFOO AND contentOrPathBAR)');
+    expect(translate(and(FOO, property, BAR))).toBe('(contentOrNameFOO AND contentOrNameBAR)');
   });
 
   it('flattens nested AND and OR', () => {
     const nestedAnd = and(BAR, BAZ);
     const nestedOr = or(BAR, BAZ);
-    expect(translate(and(FOO, nestedAnd))).toBe('(contentOrPathFOO AND contentOrPathBAR AND contentOrPathBAZ)');
-    expect(translate(or(FOO, nestedOr))).toBe('(contentOrPathFOO OR contentOrPathBAR OR contentOrPathBAZ)');
+    expect(translate(and(FOO, nestedAnd))).toBe('(contentOrNameFOO AND contentOrNameBAR AND contentOrNameBAZ)');
+    expect(translate(or(FOO, nestedOr))).toBe('(contentOrNameFOO OR contentOrNameBAR OR contentOrNameBAZ)');
   });
 
   it('unites OR, and narrows nothing when one branch narrows nothing', () => {
-    expect(translate(or(FOO, BAR))).toBe('(contentOrPathFOO OR contentOrPathBAR)');
+    expect(translate(or(FOO, BAR))).toBe('(contentOrNameFOO OR contentOrNameBAR)');
     expect(translate(or(FOO, SHORT))).toBe('*');
   });
 
   it('collapses a composite down to its only narrowing child', () => {
-    expect(translate(and(FOO, SHORT))).toBe('contentOrPathFOO');
+    expect(translate(and(FOO, SHORT))).toBe('contentOrNameFOO');
     expect(translate(and(SHORT, SHORT))).toBe('*');
   });
 
   it('narrows nothing for a negation', () => {
     const negation = unary('negation', BAR);
     expect(translate(unary('negation', FOO))).toBe('*');
-    expect(translate(and(FOO, negation))).toBe('contentOrPathFOO');
+    expect(translate(and(FOO, negation))).toBe('contentOrNameFOO');
   });
 
   it('passes case overrides through', () => {
     const caseMatcher = node('case', strictProxy<SearchCaseMatcher>({ caseSensitive: true, matcher: FOO }));
-    expect(translate(caseMatcher)).toBe('contentOrPathFOO');
+    expect(translate(caseMatcher)).toBe('contentOrNameFOO');
   });
 
-  it('scopes content: to the content and file: and path: to the path', () => {
+  it('scopes content: to the content, file: to the name and path: to the path', () => {
     const either = or(FOO, BAR);
     expect(translate(unary('content', FOO))).toBe('contentFOO');
-    expect(translate(unary('file', FOO))).toBe('pathFOO');
+    expect(translate(unary('file', FOO))).toBe('nameFOO');
     expect(translate(unary('path', either))).toBe('(pathFOO OR pathBAR)');
   });
 

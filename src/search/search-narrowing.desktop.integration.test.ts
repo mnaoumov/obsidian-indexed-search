@@ -5,7 +5,9 @@
  * with it on.
  *
  * Each query runs twice on one vault: once with the plugin disabled, so core scans every file, and once enabled
- * and caught up, so the index narrows core's queue. The notes plant terms in content, names, paths, tags and a
+ * and caught up, so the index narrows core's queue. Before each run a query searches what `after` names, or a term
+ * nothing holds: core re-scans only the previous search's matches when a query extends it, so the reset keeps that
+ * shortcut out of every run but the typing ones, which ask for it. The notes plant terms in content, names, paths, tags and a
  * canvas, in both cases and in scripts whose case folding differs, so every branch of the translation is checked
  * against core's own matcher. Every read of a test note is slowed by a millisecond, so a full scan outlasts the
  * index's answer and the narrowing is visible in the read count.
@@ -43,6 +45,10 @@ interface IndexPlugin {
 }
 
 interface ParityQuery {
+  /**
+   * The query searched just before, as if typed on from it; when absent, a term nothing holds.
+   */
+  readonly after?: string;
   readonly isNarrowable: boolean;
   readonly query: string;
 }
@@ -60,12 +66,20 @@ interface SearchRun {
 const FOLDER = 'parity';
 const NOTE_COUNT = 600;
 const PLUGIN_ID = 'indexed-search';
+const RESET_QUERY = 'zqxjresetzqxj';
 
 /**
  * The query corpus. `isNarrowable` marks the queries the index must narrow, so their narrowed run reads fewer notes.
  */
 const QUERIES: readonly ParityQuery[] = [
   { isNarrowable: true, query: 'quillwort' },
+  // Typing on: core re-scans only what `quill` did not rule out. With the plugin, that is only the notes the index
+  // kept for `quill`, and so few that they go straight back with no wait for the index.
+  { after: 'quill', isNarrowable: false, query: 'quillw' },
+  { after: 'quillwort', isNarrowable: false, query: 'quillwort silver' },
+  // A bare term matches a file name, never a folder name: `sub` matches `submarine.md`, and none of the notes under
+  // `parity/sub`.
+  { isNarrowable: true, query: 'sub' },
   { isNarrowable: true, query: 'QUILLWORT' },
   { isNarrowable: true, query: 'llwor' },
   { isNarrowable: true, query: '"silver harbour lantern"' },
@@ -141,6 +155,7 @@ describe('core Search parity with the plugin on and off', () => {
           await app.vault.create(`${parent}/${name}.md`, lines.join('\n'));
         }
         await app.vault.create(`${folder}/name-only-marker.md`, 'Nothing to see in the body.');
+        await app.vault.create(`${folder}/submarine.md`, 'Nothing here either.');
         await app.vault.create(
           `${folder}/board.canvas`,
           JSON.stringify({ edges: [], nodes: [{ height: 60, id: 'n1', text: 'canvasterm quillwort', type: 'text', width: 200, x: 0, y: 0 }] })
@@ -240,14 +255,15 @@ describe('core Search parity with the plugin on and off', () => {
     });
   });
 
-  it.each(QUERIES)('returns core\'s own results for $query', async ({ isNarrowable, query }) => {
+  it.each(QUERIES)('returns core\'s own results for $query', async ({ after, isNarrowable, query }) => {
     const result = await evalInObsidian({
-      async callback({ app, pluginId, query: searchQuery }) {
+      async callback({ app, pluginId, previousQuery, query: searchQuery }) {
         const state = window.indexedSearchParityTest;
         if (!state) {
           throw new Error('The parity test state is missing');
         }
         await app.plugins.disablePlugin(pluginId);
+        await state.runSearch(previousQuery);
         const plain = await state.runSearch(searchQuery);
         await app.plugins.enablePlugin(pluginId);
         const plugin = app.plugins.getPlugin(pluginId) as IndexPlugin | null;
@@ -255,10 +271,11 @@ describe('core Search parity with the plugin on and off', () => {
           throw new Error('Plugin not loaded');
         }
         await plugin.trigramIndexComponent.whenIdle();
+        await state.runSearch(previousQuery);
         const narrowed = await state.runSearch(searchQuery);
         return { narrowed, plain };
       },
-      input: { pluginId: PLUGIN_ID, query },
+      input: { pluginId: PLUGIN_ID, previousQuery: after ?? RESET_QUERY, query },
       vaultPath
     });
 

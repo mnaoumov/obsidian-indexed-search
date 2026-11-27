@@ -11,8 +11,8 @@
  * - AND is `null` as soon as one child is, so its candidates are the intersection of its children's.
  * - OR is `null` only when every child is `null` or `undefined`, so its candidates are the union.
  * - Negation turns `null` into a match, so it narrows nothing.
- * - Text, quoted text and regex search the file name and the content of a Markdown note; `file:` and `path:`
- *   restrict them to the name or the path, `content:` to the content.
+ * - Text, quoted text and regex search the file name (with its extension, never its folders) and the content of a
+ *   Markdown note; `file:` restricts them to the name, `path:` to the vault-relative path, `content:` to the content.
  * - `tag:` tests core's own `^<tag>($|/)` regex, with `i`, against the note's cached tags. The tag is escaped from the text
  *   node's `text`, as core 1.15.1 does: its text node no longer carries a `regex`, which 1.14.5 built the same way.
  */
@@ -83,11 +83,14 @@ export interface TermCandidateExpression {
 }
 
 /**
- * Where a term is searched: the note's content and its path, only its content, or only its path.
+ * Where a term is searched: the note's content and its file name, only its content, only its file name, or only
+ * its vault-relative path.
  *
- * A path holds the file name, so a path scope is a superset of a name scope.
+ * Core's match context for a file holds its name (`TFile.name`, with the extension) under `filename` and its path
+ * under `filepath`, and a term outside `path:` reads only `filename` and `content` (catalyst 1.15.1). So a bare
+ * term never matches a folder name: `court` does not match every file under `Court case/`.
  */
-export type TermScope = 'content' | 'contentOrPath' | 'path';
+export type TermScope = 'content' | 'contentOrName' | 'name' | 'path';
 
 const ALL_EXPRESSION: AllCandidateExpression = { kind: 'all' };
 
@@ -99,7 +102,7 @@ const ALL_EXPRESSION: AllCandidateExpression = { kind: 'all' };
  * @returns The candidate expression; `all` when the query narrows nothing.
  */
 export function translateMatcher(matcher: SearchMatcher, guards: SearchMatcherGuards): CandidateExpression {
-  return translate(matcher, guards, 'contentOrPath');
+  return translate(matcher, guards, 'contentOrName');
 }
 
 function combine(kind: 'and' | 'or', children: readonly CandidateExpression[]): CandidateExpression {
@@ -130,10 +133,13 @@ function translate(node: SearchMatcher, guards: SearchMatcherGuards, nodeScope: 
     if (guards.case(matcher)) {
       // The trigram fold equates every pair of code units either case setting does.
       matcher = matcher.matcher;
-    } else if (scope === 'contentOrPath' && guards.content(matcher)) {
+    } else if (scope === 'contentOrName' && guards.content(matcher)) {
       matcher = matcher.matcher;
       scope = 'content';
-    } else if (scope === 'contentOrPath' && (guards.file(matcher) || guards.path(matcher))) {
+    } else if (scope === 'contentOrName' && guards.file(matcher)) {
+      matcher = matcher.matcher;
+      scope = 'name';
+    } else if (scope === 'contentOrName' && guards.path(matcher)) {
       matcher = matcher.matcher;
       scope = 'path';
     } else {
@@ -158,7 +164,7 @@ function translate(node: SearchMatcher, guards: SearchMatcherGuards, nodeScope: 
     return term(regexQuery(matcher.regex), scope);
   }
   // Core rejects a scope operator nested in another, so `tag:` is translated only outside one.
-  return scope === 'contentOrPath' && guards.tag(matcher)
+  return scope === 'contentOrName' && guards.tag(matcher)
     ? { kind: 'tag', regex: new RegExp(String.raw`^${escapeRegExp(matcher.matcher.text)}($|\/)`, 'i') }
     : ALL_EXPRESSION;
 }
