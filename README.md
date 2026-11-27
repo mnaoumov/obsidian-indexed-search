@@ -59,15 +59,21 @@ A copy of the vault ships with every release. You can access it via any of the f
 | [`CJK Search`](https://community.obsidian.md/plugins/cjk-search-probe) | matches equivalent CJK and compatibility characters in Search and other views | Complements it: does not change what a query matches |
 | [`Core Search Assistant`](https://community.obsidian.md/plugins/obsidian-core-search-assistant-plugin) | a keyboard interface and bigger previews for core Search | Complements it: no interface of its own |
 | [`Fast Find 10K`](https://community.obsidian.md/plugins/fast-find) | fast fuzzy search for large vaults, titles first, then headings, then content | Same goal, different engine: no separate search box or ranking; core Search answers |
+| [`Float Search Window`](https://community.obsidian.md/plugins/float-search-window) | opens core Search in a floating window, with match previews and a quick search | Complements it: changes where the pane opens, not which notes it reads |
+| [`Floating Search`](https://community.obsidian.md/plugins/float-search) | core Search's view in a floating modal or a pop-out | Complements it: changes where the pane opens, not which notes it reads |
+| [`Jet Search`](https://community.obsidian.md/plugins/jet-search) | its own instant search box over a saved index, with typo tolerance, ranking and answers; desktop only | Same goal, different engine: keeps core Search's pane, syntax and exact results; also on mobile |
 | [`Lean Search`](https://community.obsidian.md/plugins/lean-search) | its own quick search with precise matching and frecency ranking | Same goal, different engine: core Search's own results and order |
 | [`Native Search`](https://community.obsidian.md/plugins/native-search) | answers from the operating system's index (macOS Spotlight) in its own view | Same goal, different engine: an index of its own on every platform, and core Search answers |
 | [`Native Search Replace`](https://community.obsidian.md/plugins/native-search-replace) | adds replace controls to core Search | Complements it: no replace; only fewer files to read |
 | [`Omnisearch`](https://community.obsidian.md/plugins/omnisearch) | its own fuzzy, ranked search box over a persistent index, with PDFs and OCR | Same goal, different engine: keeps core Search's pane, syntax and exact results |
 | [`Power Explorer`](https://community.obsidian.md/plugins/powerexplorer) | a file explorer with instant word-prefix search for huge vaults | Same goal, different engine: substrings and regexes, through core Search |
+| [`Radar Search`](https://community.obsidian.md/plugins/primecore-search) | one search box for note names, CJK full text, tags, commands and the web | Same goal, different engine: core Search's pane and results; notes only |
+| [`RGA Search`](https://community.obsidian.md/plugins/rga-search) | searches inside PDFs, EPUBs and Office files with the external `ripgrep-all`; desktop only | Covers what core Search does not read: leaves documents to it; makes the note search faster |
+| [`Title First Search`](https://community.obsidian.md/plugins/title-first-search) | a Title matches section above core Search's results, and a title-only modal | Complements it: adds no section; core's results come back sooner |
 | [`Vault Finder`](https://community.obsidian.md/plugins/vault-finder) | its own fast full-text search, with optional AI keyword expansion | Same goal, different engine: core Search's exact results, no AI |
 | [`VaultDex`](https://community.obsidian.md/plugins/vaultdex) | relevance-scored full-text search with PARA filters and its own operators | Same goal, different engine: core Search's query language and results |
 
-Last searched for similar plugins on 2026-11-01.
+Last searched for similar plugins on 2026-11-27.
 
 ## For plugin developers
 
